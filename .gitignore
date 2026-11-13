@@ -1,0 +1,19 @@
+# --- Personal: never publish ---------------------------------------------------
+local.env
+CLAUDE.local.md
+# the student's data and plan logs (state.example.json is the empty template)
+state/*
+!state/state.example.json
+plans/
+
+# --- Build and runtime artifacts ----------------------------------------------
+WebDriverAgent/
+WebDriverAgent-iphone/
+DerivedData/
+DerivedData-iphone/
+.session/
+.session-iphone/
+*.log
+__pycache__/
+*.pyc
+.DS_Store

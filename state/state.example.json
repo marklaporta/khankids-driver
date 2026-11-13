@@ -1,0 +1,31 @@
+{
+ "letter_idx": 0,
+ "skill_idx": 0,
+ "book_idx": 0,
+ "reviews": [],
+ "scored": {},
+ "letters_assigned": {},
+ "assisted": {},
+ "lower_queued": [],
+ "no_level": [],
+ "scan_keys": [
+  "ELA",
+  "Math",
+  "Logic+",
+  "ELA4",
+  "Math4",
+  "Logic+4"
+ ],
+ "attempts": {},
+ "last_run": "",
+ "probes": {},
+ "credited": {},
+ "opened": [],
+ "struggled": {},
+ "focus": {},
+ "hold": {},
+ "unplaceable": [],
+ "observations": [],
+ "rollback": {},
+ "day_caps": {}
+}
