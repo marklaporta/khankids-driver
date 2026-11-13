@@ -3,11 +3,13 @@
 Drives the Khan Academy Kids teacher view on an iPad or iPhone from this Mac via WebDriverAgent (WDA): it reads the
 student's progress reports and assigns lessons. The planning (what to assign, when) is the `populate-student` skill
 (`.claude/skills/populate-student/SKILL.md`): `process.py` reads, plans with `planner.py`, applies and verifies.
-`nightly.py` is the older planner, kept for `read_app()`.
+`nightly.py` is the older planner, kept for `read_app()`. First-time setup, and revisiting a family's choices, is the
+`setup-student` skill: if `local.env` or `state/state.json` is missing, start there.
 
 Personal settings (device ids, signing, teacher and Google account names) live in the gitignored `local.env`
 (template: `local.env.example`). Student-specific notes, if any, live in `CLAUDE.local.md`. Never put either kind of
-detail in a tracked file. `state/` and `plans/` hold the student's data and are gitignored too.
+detail in a tracked file. `state/` and `plans/` hold the student's data and are gitignored too. The family's choices
+(lessons a day, horizon, play content, books) are `state.json` "settings", applied by `planner.configure()`.
 
 ## Session start
 - iPad (default): `./start-wda.sh`. iPhone: `./start-wda-iphone.sh`, then run every script with `KK_DEVICE=iphone`.

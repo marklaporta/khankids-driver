@@ -4,7 +4,7 @@
  2. planner.plan(): 5 lessons/day (gates first) over the horizon (needs-work retries + next new lessons, hole-filling, mastery-based grades)
  3. (no sticky step: the plan is authoritative and the app mirrors it exactly)
  4. ONE pass per report subject in list order through All Progress: creates new assignments, re-dates existing ones
-    (pre-checked dialog), parks unwanted future ones to Dec 1. Assignments-tab re-date only as a fallback.
+    (pre-checked dialog), parks unwanted future ones to a far-off pool date (state "park_date"). Assignments-tab re-date only as a fallback.
  5. finish: print the plan; verify with `process.py --preview` (moves/creates/parks all 0).
 Usage: nohup python3 -u process.py [--preview] [--tomorrow] [--full-catalog] [--full-scan] > state/process.out 2>&1 &"""
 import sys, os, json, time, datetime, subprocess
@@ -13,18 +13,21 @@ PREVIEW = "--preview" in sys.argv; TOMORROW = "--tomorrow" in sys.argv
 FULL_CAT = "--full-catalog" in sys.argv; FULL_SCAN = "--full-scan" in sys.argv
 CLEAR_DONE_TODAY = "--clear-done-today" in sys.argv
 CLEAR_TODAY = "--clear-today" in sys.argv               # parent 10/14: nothing assigned today (the child does the Learning Path instead)     # parent 10/10: take today's finished (green-check) lessons out of their view
-DAYS = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else 7
+DAYS_ARG = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else None
 TODAY_MAX = int(sys.argv[sys.argv.index("--today-max") + 1]) if "--today-max" in sys.argv else None   # parent can override the after-play cap
 sys.argv = [sys.argv[0], "none"]
 import kk, fill, planner, nightly
 TODAY = datetime.date.today(); NOW = datetime.datetime.now()
-PARK = (12, 1)
+PARK_AHEAD_DAYS, PARK_MIN_DAYS = 90, 30   # parking pool: a far-off date, rolled forward before the child could reach it
 EXACT_DAYS = 2      # architect's call 10/13: mirror the plan exactly for the next 2 days; later lessons may sit on any later day
                     # (invisible to them until their date; each run re-aligns before the child can see them). Saves ~60 re-dates per skipped day.
 ST = 'type == "XCUIElementTypeStaticText" AND '
 SP = f"{D}/state/state.json"
 state = json.load(open(SP))
 def save_state(): json.dump(state, open(SP, "w"), indent=1)
+SETTINGS = state.get("settings", {})                    # family choices (setup-student skill); planner defaults otherwise
+planner.configure(SETTINGS)
+DAYS = DAYS_ARG or int(SETTINGS.get("horizon_days", 7))
 
 # ---------- 1a. catalog: full read weekly, merged per report key ----------
 CAT = f"{D}/state/catalog-latest.json"
@@ -174,7 +177,11 @@ def main():
     lowest = {}
     for c in cat:
         if c["title"] not in lowest or kk.split_key(c["subject"])[1] < kk.split_key(lowest[c["title"]])[1]: lowest[c["title"]] = c["subject"]
-    park_date = datetime.date(TODAY.year, *PARK)
+    pd = state.get("park_date")
+    park_date = datetime.date.fromisoformat(pd) if pd else None
+    if not park_date or (park_date - TODAY).days < PARK_MIN_DAYS:   # roll the pool forward; lessons in the old pool move once
+        park_date = TODAY + datetime.timedelta(days=PARK_AHEAD_DAYS)
+        if not PREVIEW: state["park_date"] = park_date.isoformat(); save_state()
     def diff(rows):
         rowmap = {(r["title"], r["level"]): r for r in rows}
         ops = []                                        # (subject, title, level, date, kind)

@@ -9,6 +9,9 @@ Intent: a mastery-based, adaptive plan using only Khan Academy Kids. Claude is t
 the student's performance on every prior lesson, then assign the next logical lessons in their zone of proximal development.
 No gaps; fill holes before building on them; never re-assign work the student has already done well.
 If `CLAUDE.local.md` exists, it holds this student's notes (observations, active holds, the parent's decisions): read it first.
+If `local.env` or `state/state.json` is missing, the family hasn't been set up yet: use the `setup-student` skill first.
+The family's choices (lessons a day, horizon, play content, books, excluded titles) are in `state.json` "settings";
+change them there, not in `planner.py`.
 
 ## Device
 - iPad (default, `KK_DEVICE=ipad`): `./start-wda.sh`. iPhone: `./start-wda-iphone.sh` and run EVERY script with
@@ -31,7 +34,7 @@ If `CLAUDE.local.md` exists, it holds this student's notes (observations, active
    days after the first. The missing result is assigned as Practice 1 (else Practice 2) of the last lesson passed, why =
    "second result before moving on". This is the one exception to "no practice on mastered work". No practice level in the
    app = no extra requirement. Rollback ladders keep their own rule.
-2. `DAILY` (5) A DAY, GATES FIRST. A gate is a rollback step or a readiness check; up to 3 go into the day before anything
+2. `daily` (default 5) A DAY, GATES FIRST. A gate is a rollback step or a readiness check; up to 3 go into the day before anything
    else and outside the retry limit, then 1 letter, then the queue. A small day gets finished; a big one gets cherry-picked.
 3. SHORT HOLDS. A hold gets its readiness check after `HOLD_CHECK_DAYS` (5) at most, whatever `until` says, unless the hold
    has `"fixed": true` (the parent named the date). A failed check (< 70) rests `HOLD_EXTEND_DAYS` (7).
@@ -53,7 +56,7 @@ COPY of state (overlay + mark_done as in process.py), including what-if attempts
    minutes. If the device locks, the run waits up to 60 minutes for it to be unlocked instead of failing.
    If the run is interrupted, just rerun it: it is stateless and only does the remaining diff.
    Options:
-   - `--days N` sets the horizon length (default 7).
+   - `--days N` sets the horizon for this run (default: settings `horizon_days`, else 7).
    - `--clear-done-today` moves lessons finished today into the parking pool and gives fresh ones for today.
    - `--clear-today` assigns nothing today; `--today-max N` sizes today for this run only.
    - `--full-catalog` forces a full catalog read; `--full-scan` re-reads every assignment.
@@ -72,7 +75,8 @@ Targets: about 5 minutes for a nightly run, 20-25 minutes for a full rebuild. Th
   snapshotMaxDepth 25, useFirstMatch. Without it, every tap and query waits for a quiescence the Unity app never reaches.
 - One pass, list order. Every operation goes through Class Reports > All Progress, sorted by the lesson's position in that
   subject's list, so `find_el` only scrolls a little further down; there is no search from the top per lesson. Operations
-  are creates, moves of existing assignments, and parks of unwanted ones to the parking date (`PARK` in process.py).
+  are creates, moves of existing assignments, and parks of unwanted ones to a far-off pool date (state "park_date", rolled forward
+  automatically before the child could reach it; when it rolls, the old pool moves once, which makes that run longer).
   - Existing assignment: the dialog opens with the student's checkbox already checked. Khan Kids has one assignment per
     lesson and level. `fast_create2` changes its date in place, or closes it if the date is already right.
   - The Assignments-tab `kk.redate` is only a fallback.
@@ -160,7 +164,7 @@ NEVER edit `state/state.json` while `process.py` is running: it saves its in-mem
     3. reach probes
     4. the next new step of each open strand
     5. letter stages, at most 3 per letter per plan (`LETTER_STAGES_PER_PLAN`), on separate days
-  - Per-day limits: `DAILY` lessons, gates first, then 1 letter lesson, 0 books (`BOOKS_PER_DAY`), 2 retries, 1 probe, and
+  - Per-day limits: `daily` lessons, gates first, then 1 letter lesson, `books_per_day` books, 2 retries, 1 probe, and
     no two lessons from the same strand. Letters fill any slot nothing better claims, and a letter's whole tracing ladder
     (Letter X, lowercase, uppercase) may sit in one plan on separate days. Consequence: the plan front-loads, and its last
     days can be nearly empty until the next run refills them.
@@ -174,12 +178,13 @@ NEVER edit `state/state.json` while `process.py` is running: it saves its in-mem
   - Nothing is padded. The later days of the plan are often short because the remaining appropriate work depends on results
     the student hasn't produced yet. Each run recomputes, so those days fill as the student progresses. The notes say why a
     day is short.
-- Books are not assigned (`BOOKS_PER_DAY = 0`): they are unscored and give no evidence. Don't add them back to fill short
-  days. If ever restored: non-fiction first, decodable Early Readers only after CVC opens.
-- Today holds up to `DAILY` like any other day; there is no standing after-play cap. When the parent asks for a smaller or
+- Books follow settings `books_per_day` (default 0): they are unscored and give no evidence, so never use them to fill
+  short days. When the family wants them: non-fiction first, decodable Early Readers only after CVC opens.
+- Today holds up to `daily` like any other day; there is no standing after-play cap. When the parent asks for a smaller or
   different day, use `--today-max N` for that run (or `state.json` "day_caps" {date: n}). If the student is done for the
   day, use `--tomorrow`.
-- Excluded on purpose: Logic+ songs, movement, feelings and habit videos (no effortless loops).
+- Play content (Logic+ songs, movement, feelings and habits) is assigned only when settings `include_play` is true;
+  otherwise only the cognitive Logic+ categories are. Settings `exclude_titles` removes specific lessons.
 - Diff into creates, moves and parks in one list-order pass, then verify and repair rounds. See Speed design.
   `EXACT_DAYS` = 2: today and tomorrow are mirrored exactly. A wanted lesson already sitting on any later day stays put,
   because the student can't see it until its date and each run re-aligns the next two days. This avoids many re-dates
@@ -227,4 +232,5 @@ NEVER edit `state/state.json` while `process.py` is running: it saves its in-mem
 - Difficulty verdict. Raise when most new Main first attempts are 90% or more for two weeks; then consider moving ELA up a
   grade as well. Lower when new Main first attempts fall under 70% for a week; then reduce new stages per day and lean on Basic.
 - Anything the rules got wrong for the student. Fix the rule in `planner.py`, not by hand in the app.
+- Whether the family's settings still fit (daily load, play content, books). Propose a change; the parent decides.
 - Teacher settings that must stay as the parent set them (see `CLAUDE.local.md` if present). Teacher-Only Device stays OFF.

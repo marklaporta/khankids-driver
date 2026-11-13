@@ -27,5 +27,13 @@
  "unplaceable": [],
  "observations": [],
  "rollback": {},
- "day_caps": {}
+ "day_caps": {},
+ "settings": {
+  "daily": 5,
+  "horizon_days": 7,
+  "include_play": false,
+  "books_per_day": 0,
+  "exclude_titles": []
+ },
+ "park_date": ""
 }

@@ -36,37 +36,40 @@ The rules live in [`planner.py`](planner.py) and are explained in the Claude Cod
 
 - [Claude Code](https://claude.com/claude-code), or another coding agent that reads `CLAUDE.md` and skills. The repo
   is organized around it: `CLAUDE.md` gives the agent the device and app mechanics, and the `populate-student` skill
-  gives it the planning process.
+  gives it the planning process, and the `setup-student` skill onboards a new family.
 - A Mac with Xcode and an Apple Developer team (a free personal team works) to sign the WebDriverAgent runner.
 - [Homebrew](https://brew.sh) `libimobiledevice` for the `iproxy` USB tunnel: `brew install libimobiledevice`.
 - Python 3 (standard library only).
 - An iPad or iPhone with Khan Academy Kids signed in to a teacher (class) account, with one student in the class.
 
-## Setup
+## Getting started
 
-The agent can do these steps with you. Open the folder in Claude Code and ask it to set things up.
+```bash
+git clone https://github.com/marklaporta/khankids-driver.git
+cd khankids-driver
+claude
+```
 
-1. Clone WebDriverAgent into the repo folder and build the runner once for your device (`WebDriverAgent-iphone/` for an iPhone):
+Then say **"set me up"**. The `setup-student` skill walks you through it:
 
-   ```bash
-   git clone https://github.com/appium/WebDriverAgent.git
-   ```
+1. **Checks your Mac**: Xcode, `iproxy`, Python, and your Apple signing team.
+2. **Checks the app side**: a teacher (class) account with your child as the student, and which device holds the
+   teacher view (the child's iPad, or your iPhone).
+3. **Sets up the device**: Developer Mode and UI Automation, reading the device ids, building WebDriverAgent, and writing
+   your `local.env`.
+4. **Interviews you** about your child and what you want from the app:
+   - your child's age, what they can already do, and their interests
+   - your goals, how much screen time and free play you want, and how involved you want to be
+   - lessons per day and how far ahead to plan
+   - whether to include the play-focused lessons (songs, movement, feelings, habits) and books
+   - whether the child can see the Videos and Create tabs in the app
 
-   Build it with `xcodebuild build-for-testing` (see the arguments in `start-wda.sh`), or open the project in Xcode and
-   run the `WebDriverAgentRunner` test once.
-2. Copy the settings template and fill it in (device ids, signing, teacher profile name, Google account):
+   The defaults reflect one family's choices. Choose your own.
+5. **Writes your family's files**: settings in `state/state.json`, notes in `CLAUDE.local.md`, and the first entry in
+   `plans/`. All of these are gitignored.
+6. **Runs a first preview with you**: you look over the plan together and adjust it. Only then does it assign anything.
 
-   ```bash
-   cp local.env.example local.env
-   ```
-
-3. Start from an empty state:
-
-   ```bash
-   cp state/state.example.json state/state.json
-   ```
-
-`local.env`, `state/` and `plans/` are gitignored: they hold your device ids and your child's data.
+Run "set me up" again any time to change your choices.
 
 ## Usage
 

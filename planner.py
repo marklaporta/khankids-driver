@@ -35,9 +35,25 @@ ENDING_GATE_FOR_VOWELS = 6  # short vowels / CVC open after this many ending sou
 LOGIC_OK_CATEGORIES = ("Flexible Thinking", "Focus & Memory")      # cognitive work only (songs/movement/feelings excluded)
 NOT_WORK = {"What do you hear?", "The Muffin Man", "Apples & Bananas", "Hickory Dickory", "Old MacDonald", "Hello A, Hello Z",
             "Mystery Box", "Uh Huh"}
+NOT_WORK_DEFAULT = frozenset(NOT_WORK)
 BOOK_CATS_READERS = ("Early Readers", "Stories")
+INCLUDE_PLAY = False        # False: Logic+ only in LOGIC_OK_CATEGORIES, and NOT_WORK titles (songs etc.) are never assigned
 BOOK_CATS_NONFIC = ("National Geographic Young Explorer", "Non-Fiction: Animals", "Non-Fiction: Vehicles")
 LETTER_CATS = ("Phonics: Extra", "Lowercase", "Uppercase", "Beginning Letter", "Ending Letter", "Short Vowel")   # item-specific: never credited
+
+# Family choices, set per family in state.json "settings" (written by the setup-student skill). Defaults are the constants above.
+SETTINGS = {"daily": "DAILY", "books_per_day": "BOOKS_PER_DAY", "max_retries_per_day": "MAX_RETRIES_PER_DAY",
+            "letter_slots": "LETTER_SLOTS", "max_gates_per_day": "MAX_GATES_PER_DAY"}
+def configure(settings):
+    """Apply state.json "settings": the integer knobs above, "include_play" (bool) and "exclude_titles" (list of lesson titles)."""
+    g = globals()
+    for key, name in SETTINGS.items():
+        if key in settings: g[name] = int(settings[key])
+    if "include_play" in settings: g["INCLUDE_PLAY"] = bool(settings["include_play"])
+    g["NOT_WORK"] = (set() if g["INCLUDE_PLAY"] else set(NOT_WORK_DEFAULT)) | set(settings.get("exclude_titles", []))
+def logic_ok(v):
+    """Logic+ lessons count as work only in the cognitive categories, unless the family includes play content."""
+    return INCLUDE_PLAY or not v["subject"].startswith("Logic+") or v["category"] in LOGIC_OK_CATEGORIES
 
 # Strand ladders across grades. A lesson at grade g opens when these strands one grade down are solid.
 MATH4_PREREQ = {
@@ -163,8 +179,7 @@ def plan(catalog, rows, state, horizon, caps=None):
     def is_book(v): return (v["category"] or "") in BOOK_CATS_READERS + BOOK_CATS_NONFIC
     def is_skill(v):
         if is_book(v) or v["title"] in NOT_WORK: return False
-        if v["subject"].startswith("Logic+") and v["category"] not in LOGIC_OK_CATEGORIES: return False
-        return True
+        return logic_ok(v)
     def norm(cat): return (cat or "").lower().replace("within 4", "within").replace("within 3", "within")
     strands = {}
     for v in sorted(les.values(), key=lambda v: v["pos"]):
@@ -344,7 +359,7 @@ def plan(catalog, rows, state, horizon, caps=None):
     for v in les.values():
         if v["status"] != "needs_work" or by_title.get(v["title"]) is not v or v["pct"] >= RETRY_BELOW: continue
         if held_title(v["title"]): continue
-        if v["subject"].startswith("Logic+") and (v["category"] not in LOGIC_OK_CATEGORIES or v["title"] in NOT_WORK): continue
+        if v["subject"].startswith("Logic+") and (not logic_ok(v) or v["title"] in NOT_WORK): continue
         if superseded(v): notes.append(f"superseded (no retry): {v['title']} {v['pct']}"); continue
         if is_sequential(v) and base_grade(v["subject"])[0] == "Math":
             nc = step_confirm(v)                       # e.g. 4th-6th (41) is not retried the day after ONE pass on 1st-3rd
