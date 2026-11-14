@@ -587,8 +587,8 @@ def close_dialog():
     c = q('type == "XCUIElementTypeImage" AND name CONTAINS "leaf_hintvideo_close_btn"')
     if c: click(c); wait_for(DIALOG, 3, gone=True)
 
-def fast_create2(title, level, m, d, state):
-    """Reliable element-order path (~12 s/lesson). find row -> open dialog -> the student -> date (once/day) -> Save."""
+def open_assign_dialog(title, level):
+    """Find title@level in All Progress (subject already set) and open ITS Assign dialog. Returns None, or an error string."""
     ST = 'type == "XCUIElementTypeStaticText" AND '
     tid = find_el(title)
     if not tid: return "row not found"
@@ -621,6 +621,29 @@ def fast_create2(title, level, m, d, state):
         else: click(lv)
         if not wait_for(DIALOG, 4): return "dialog did not open"
     if not dialog_is(title, level): close_dialog(); return "wrong dialog"      # never touch another lesson's assignment
+    return None
+
+def unassign(title, level):
+    """Remove the student's assignment of title@level: open its dialog, uncheck the student, Save."""
+    ST = 'type == "XCUIElementTypeStaticText" AND '
+    err = open_assign_dialog(title, level)
+    if err: return err
+    on = q('type == "XCUIElementTypeImage" AND name CONTAINS "teacherlibrary_checkbox2" AND rect.x < 250 AND rect.y > %d' % G["student_box_y"])
+    if not on: close_dialog(); return "not assigned"
+    click(on); time.sleep(0.3)
+    if q('type == "XCUIElementTypeImage" AND name CONTAINS "teacherlibrary_checkbox2" AND rect.x < 250 AND rect.y > %d' % G["student_box_y"]):
+        close_dialog(); return "checkbox did not uncheck"
+    sv = q(ST + lbl("Save") + " AND rect.y < %d" % G["dlg_save_y"])
+    if not sv: close_dialog(); return "dialog save not found"
+    click(sv)
+    if not wait_for(DIALOG, 4, gone=True): return "dialog stayed open after Save"
+    return "unassigned"
+
+def fast_create2(title, level, m, d, state):
+    """Reliable element-order path (~12 s/lesson). find row -> open dialog -> the student -> date (once/day) -> Save."""
+    ST = 'type == "XCUIElementTypeStaticText" AND '
+    err = open_assign_dialog(title, level)
+    if err: return err
     def student_box(name):
         e = q('type == "XCUIElementTypeImage" AND name CONTAINS "%s" AND rect.x < 250 AND rect.y > %d' % (name, G["student_box_y"]))
         return [e] if e else []

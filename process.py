@@ -4,8 +4,9 @@
  2. planner.plan(): 5 lessons/day (gates first) over the horizon (needs-work retries + next new lessons, hole-filling, mastery-based grades)
  3. (no sticky step: the plan is authoritative and the app mirrors it exactly)
  4. ONE pass per report subject in list order through All Progress: creates new assignments, re-dates existing ones
-    (pre-checked dialog), parks unwanted future ones to a far-off pool date (state "park_date"). Assignments-tab re-date only as a fallback.
- 5. finish: print the plan; verify with `process.py --preview` (moves/creates/parks all 0).
+    (pre-checked dialog), unassigns anything else still open from the start of the plan on (no parking pool, 11/14).
+    Assignments-tab re-date only as a fallback.
+ 5. finish: print the plan; verify with `process.py --preview` (moves/creates/unassigns all 0).
 Usage: nohup python3 -u process.py [--preview] [--tomorrow] [--full-catalog] [--full-scan] > state/process.out 2>&1 &"""
 import sys, os, json, time, datetime, subprocess
 D = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, D)
@@ -18,7 +19,6 @@ TODAY_MAX = int(sys.argv[sys.argv.index("--today-max") + 1]) if "--today-max" in
 sys.argv = [sys.argv[0], "none"]
 import kk, fill, planner, nightly
 TODAY = datetime.date.today(); NOW = datetime.datetime.now()
-PARK_AHEAD_DAYS, PARK_MIN_DAYS = 90, 30   # parking pool: a far-off date, rolled forward before the child could reach it
 EXACT_DAYS = 2      # architect's call 10/13: mirror the plan exactly for the next 2 days; later lessons may sit on any later day
                     # (invisible to them until their date; each run re-aligns before the child can see them). Saves ~60 re-dates per skipped day.
 ST = 'type == "XCUIElementTypeStaticText" AND '
@@ -81,6 +81,7 @@ def read_assignments():
     cutoff = (datetime.date.fromisoformat(last) - datetime.timedelta(days=1)) if (last and cache) else None
     safe_open("Assignments"); kk.scroll_top()
     seen = {}; prev = None; stale = 0
+    complete = False
     for _ in range(90):
         t = kk.tree(); rs = kk.rows(t)
         for title, level, dt, y in rs:
@@ -89,17 +90,21 @@ def read_assignments():
             check = any(e[0] == "Image" and "check" in e[1] and abs(e[3] - y - co) < cw for e in t)
             seen[(title, level)] = (dt, score, check)
         ds = [nightly.parse(dt) for _, _, dt, _ in rs]
-        if cutoff and ds and all(d and d < cutoff for d in ds): break        # everything older is unchanged since last run
+        if cutoff and ds and all(d and d < cutoff for d in ds): complete = True; break   # everything older is unchanged since last run
         sig = tuple(r[0] for r in rs)
         if sig and sig == prev:
             stale += 1
-            if stale >= 2: break
+            if stale >= 2: complete = True; break
         else: stale = 0
         if sig: prev = sig
         kk.page_down(); time.sleep(0.3)
     for (title, level), (dt, score, check) in seen.items():
         d = nightly.parse(dt); sc = int(score.rstrip("%")) if score.endswith("%") else None
         cache[f"{title}|{level}"] = {"title": title, "level": level, "date": d.isoformat() if d else None, "score": sc, "done": check or bool(score)}
+    if complete:                                    # rows gone from the app (unassigned) leave the cache too: every row dated in the
+        lo = cutoff.isoformat() if cutoff else ""   # re-read range was seen, so a cached row there that wasn't seen no longer exists
+        for k, v in list(cache.items()):
+            if v.get("date") and v["date"] >= lo and (v["title"], v["level"]) not in seen: del cache[k]
     json.dump(cache, open(AC, "w"), indent=1)
     rows = list(cache.values())
     att = state.setdefault("attempts", {})                                   # record WHEN each score appeared
@@ -111,6 +116,10 @@ def read_assignments():
             first = att.get(k, {}).get("first", att.get(k, {}).get("score", r["score"]))   # probes are judged on the FIRST attempt
             att[k] = {"score": r["score"], "date": min(r["date"] or TODAY.isoformat(), TODAY.isoformat()), "first": first}
     return rows
+
+def cache_drop(title, level):
+    cache = json.load(open(AC)) if os.path.exists(AC) else {}
+    if cache.pop(f"{title}|{level}", None) is not None: json.dump(cache, open(AC, "w"), indent=1)
 
 # ---------- helpers ----------
 def ensure_session():
@@ -177,36 +186,33 @@ def main():
     lowest = {}
     for c in cat:
         if c["title"] not in lowest or kk.split_key(c["subject"])[1] < kk.split_key(lowest[c["title"]])[1]: lowest[c["title"]] = c["subject"]
-    pd = state.get("park_date")
-    park_date = datetime.date.fromisoformat(pd) if pd else None
-    if not park_date or (park_date - TODAY).days < PARK_MIN_DAYS:   # roll the pool forward; lessons in the old pool move once
-        park_date = TODAY + datetime.timedelta(days=PARK_AHEAD_DAYS)
-        if not PREVIEW: state["park_date"] = park_date.isoformat(); save_state()
+    # 11/14: no parking pool. The plan lives in state/plan-*.json; the app holds ONLY the planned lessons. Anything else that is
+    # assigned and not finished, on any date from the start of the plan on, is UNASSIGNED (dialog: uncheck the student, Save).
     def diff(rows):
         rowmap = {(r["title"], r["level"]): r for r in rows}
         ops = []                                        # (subject, title, level, date, kind)
         exact_until = horizon[min(EXACT_DAYS, len(horizon)) - 1].isoformat()  # the child only SEES today's list: today+tomorrow must be exact;
-        later_ok = lambda dt: dt and exact_until < dt < park_date.isoformat()   # later days only need the lesson assigned somewhere later
+        later_ok = lambda dt: dt and exact_until < dt <= horizon[-1].isoformat()   # later days only need the lesson assigned somewhere later in the plan
         for k, (d, subj) in want.items():
             r = rowmap.get(k)
             if r and r["date"] == d.isoformat(): continue
             if r and not r["done"] and d.isoformat() > exact_until and later_ok(r["date"]): continue   # no churn between future days
             ops.append((lowest.get(k[0], subj) if r else subj, k[0], k[1], d, "move" if r else "create"))
         for k, r in rowmap.items():
-            if not r["done"] and r["date"] and horizon[0].isoformat() <= r["date"] < park_date.isoformat() and k not in want:
-                ops.append((lowest.get(k[0]), k[0], k[1], park_date, "park"))
+            if not r["done"] and r["date"] and horizon[0].isoformat() <= r["date"] and k not in want:
+                ops.append((lowest.get(k[0]), k[0], k[1], None, "unassign"))
             elif CLEAR_TODAY and not r["done"] and r["date"] == TODAY.isoformat() and k not in want:
-                ops.append((lowest.get(k[0]), k[0], k[1], park_date, "park"))      # today emptied on request
+                ops.append((lowest.get(k[0]), k[0], k[1], None, "unassign"))      # today emptied on request
             elif CLEAR_DONE_TODAY and r["done"] and r["date"] == TODAY.isoformat() and k not in want:
-                ops.append((lowest.get(k[0]), k[0], k[1], park_date, "park"))      # finished today: out of their view
+                ops.append((lowest.get(k[0]), k[0], k[1], None, "unassign"))      # finished today: out of their view (score kept in state attempts)
         return ops
     ops = diff(rows)
     print(f"\n== plan {horizon[0]} .. {horizon[-1]} ==")
     for d, xs in days.items():
         print(f"  {d.strftime('%a %m/%d')}: " + "; ".join(x["title"] + ("" if x["level"] == "Main" else f" ({x['level']})")
               + ("" if x["subject"] in ("ELA", "Math", "Logic+") else f" [{x['subject']}]") for x in xs), flush=True)
-    n = {k: sum(1 for o in ops if o[4] == k) for k in ("move", "create", "park")}
-    print(f"\nmoves {n['move']}  creates {n['create']}  parks {n['park']}", flush=True)
+    n = {k: sum(1 for o in ops if o[4] == k) for k in ("move", "create", "unassign")}
+    print(f"\nmoves {n['move']}  creates {n['create']}  unassigns {n['unassign']}", flush=True)
     json.dump({d.isoformat(): xs for d, xs in days.items()}, open(f"{D}/state/plan-{TODAY}.json", "w"), indent=1)
     if PREVIEW: save_state(); print("(preview only; nothing changed in the app)"); return
 
@@ -216,17 +222,21 @@ def main():
     for rnd in range(3):
         if not ops: break
         if rnd: print(f"\nrepair round {rnd}: {len(ops)} differences after re-read: {[(o[1], o[2], str(o[3]), o[4]) for o in ops]}", flush=True)
-        reachable = sorted([o for o in ops if o[0] in kk.REPORTS], key=lambda o: (order.index(o[0]), pos.get((o[0], o[1]), 10**6), o[2]))
-        fallback = [(o[1], o[2], o[3]) for o in ops if o[0] not in kk.REPORTS]
+        # what the child will see first: creates + moves in one list-order pass, then a second pass for the unassigns
+        reachable = sorted([o for o in ops if o[0] in kk.REPORTS], key=lambda o: (o[4] == "unassign", order.index(o[0]), pos.get((o[0], o[1]), 10**6), o[2]))
+        fallback = [(o[1], o[2], o[3]) for o in ops if o[0] not in kk.REPORTS and o[4] != "unassign"]
         tsv = f"{D}/plans/process-{TODAY}-r{rnd}.tsv"
         with open(tsv, "w") as f:
-            for subj, t, lv, d, kind in reachable: f.write(f"{subj}\t{t}\t{lv}\t{d.month}\t{d.day}\n")
+            for subj, t, lv, d, kind in reachable: f.write(f"{subj}\t{t}\t{lv}\t{d.month if d else 0}\t{d.day if d else 0}\n")   # 0/0 = unassign
         safe_open("All Progress")
         res = fill.main_ordered(tsv, f"{D}/state/process-create-{TODAY}-r{rnd}-{NOW:%H%M}.log")
         for subj, t, lv, d, kind in reachable:
-            r = res.get((t, lv, str(d.month), str(d.day)), "")
+            r = res.get((t, lv, str(d.month if d else 0), str(d.day if d else 0)), "")
+            if kind == "unassign":
+                if r in ("unassigned", "not assigned"): cache_drop(t, lv)
+                continue
             if r.startswith("level") and kind == "create" and [t, lv] not in state.setdefault("no_level", []): state["no_level"].append([t, lv])
-            if r not in ("created", "redated", "done before") and kind in ("move", "park"): fallback.append((t, lv, d))
+            if r not in ("created", "redated", "done before") and kind == "move": fallback.append((t, lv, d))
         fallback_redate(fallback, log)
         state["last_run"] = (TODAY - datetime.timedelta(days=1)).isoformat()      # re-read today's rows fully
         ops = diff(read_assignments())

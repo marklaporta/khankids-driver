@@ -23,8 +23,8 @@ The planning model is deliberately strict:
 - **Two results before moving on.** One good score from a preschooler is noise; advancing a strand needs a second result.
 - **Holds and readiness checks** for skills the child isn't ready for, re-tested on a short cycle.
 - **Small days.** A few lessons a day, readiness checks first, one letter, then the ranked queue.
-- **The app mirrors the plan.** Each run diffs the plan against the app and creates, moves or parks assignments, then
-  re-reads the app to verify.
+- **The app mirrors the plan.** Each run diffs the plan against the app and creates, moves or unassigns assignments, then
+  re-reads the app to verify. The app holds only the planned lessons; nothing is parked on a far-off date.
 
 The rules live in [`planner.py`](planner.py) and are explained in the Claude Code skill
 [`.claude/skills/populate-student/SKILL.md`](.claude/skills/populate-student/SKILL.md).

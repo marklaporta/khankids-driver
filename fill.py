@@ -116,14 +116,15 @@ def ensure(subject):
 
 def main_ordered(path, log):
     """One pass per report subject, rows already sorted by their position in that subject's list, so find_el only ever
-    scrolls DOWN a little. Creates new assignments and re-dates existing ones (pre-checked dialog) in the same pass.
+    scrolls DOWN a little. Creates new assignments, re-dates existing ones (pre-checked dialog) and unassigns (m/d = 0/0)
+    in the same pass.
     Returns {(title, level, m, d): result}."""
     plan = [l.rstrip("\n").split("\t") for l in open(path) if l.strip() and not l.startswith("#")]
     done = set()
     if os.path.exists(log):
         for l in open(log):
             f = l.rstrip("\n").split("\t")
-            if f[0] in ("created", "redated"): done.add(tuple(f[1:5]))
+            if f[0] in ("created", "redated", "unassigned"): done.add(tuple(f[1:5]))
     cur = None; state = {"date": None}; results = {}
     with open(log, "a") as out:
         for subj, title, level, m, d in plan:
@@ -134,10 +135,10 @@ def main_ordered(path, log):
                     if ensure(subj): cur = subj
                     if cur != subj:
                         kk.set_subject(subj); cur = subj; kk.scroll_top()
-                    res = kk.fast_create2(title, level, int(m), int(d), state)
+                    res = kk.unassign(title, level) if m == "0" else kk.fast_create2(title, level, int(m), int(d), state)
                 except Exception as ex:
                     res = f"error {ex!r}"; time.sleep(1)
-                if res in ("created", "redated") or res.startswith("level"): break
+                if res in ("created", "redated", "unassigned", "not assigned") or res.startswith("level"): break
                 try:
                     x = kk.q(ST + kk.lbl("Cancel"))
                     if x: kk.click(x); time.sleep(0.3)
@@ -168,7 +169,7 @@ def main(path, log):
                 for attempt in (1, 2):
                     try:
                         if ensure(subj): state["date"] = None
-                        res = kk.fast_create2(title, level, int(m), int(d), state); break
+                        res = kk.unassign(title, level) if m == "0" else kk.fast_create2(title, level, int(m), int(d), state); break
                     except Exception as ex:
                         res = f"error {ex!r}"; time.sleep(2)
                 if res != "created":

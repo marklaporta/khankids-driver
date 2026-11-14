@@ -57,14 +57,14 @@ COPY of state (overlay + mark_done as in process.py), including what-if attempts
    If the run is interrupted, just rerun it: it is stateless and only does the remaining diff.
    Options:
    - `--days N` sets the horizon for this run (default: settings `horizon_days`, else 7).
-   - `--clear-done-today` moves lessons finished today into the parking pool and gives fresh ones for today.
+   - `--clear-done-today` unassigns lessons finished today (their scores stay in state "attempts") and gives fresh ones for today.
    - `--clear-today` assigns nothing today; `--today-max N` sizes today for this run only.
    - `--full-catalog` forces a full catalog read; `--full-scan` re-reads every assignment.
    If the iPad is not on USB but is on Wi-Fi, `start-wda.sh` still launches the runner, which logs
    `ServerURLHere->http://<ip>:8100`. Create a session at that address and run with `WDA_URL=http://<ip>:8100`.
    A WDA restart inside a run only works over USB.
 5. Verification is built in: the run ends with `VERIFIED: app matches the plan`. `python3 -u process.py --preview` should
-   then print `moves 0  creates 0  parks 0`.
+   then print `moves 0  creates 0  unassigns 0`.
 6. `python3 finish.py` returns the app to the profile picker and stops WDA, which clears the "Automation Running" overlay.
 7. Log the review in `plans/<YYYY-MM>-plan.md`: what the student did, the scores, the difficulty verdict, and what is held
    for hole-filling.
@@ -75,8 +75,10 @@ Targets: about 5 minutes for a nightly run, 20-25 minutes for a full rebuild. Th
   snapshotMaxDepth 25, useFirstMatch. Without it, every tap and query waits for a quiescence the Unity app never reaches.
 - One pass, list order. Every operation goes through Class Reports > All Progress, sorted by the lesson's position in that
   subject's list, so `find_el` only scrolls a little further down; there is no search from the top per lesson. Operations
-  are creates, moves of existing assignments, and parks of unwanted ones to a far-off pool date (state "park_date", rolled forward
-  automatically before the child could reach it; when it rolls, the old pool moves once, which makes that run longer).
+  are creates, moves of existing assignments, and unassigns: anything assigned, unfinished and dated from the start of the
+  plan on that the plan doesn't want is removed (`kk.unassign`: open its dialog, uncheck the student, Save; about 10 s).
+  The plan lives in `state/`, so the app never holds a parking pool. Unassigned rows also leave `state/assign-cache.json`
+  (and the incremental read prunes cached rows in its re-read range that the app no longer shows).
   - Existing assignment: the dialog opens with the student's checkbox already checked. Khan Kids has one assignment per
     lesson and level. `fast_create2` changes its date in place, or closes it if the date is already right.
   - The Assignments-tab `kk.redate` is only a fallback.
@@ -185,7 +187,7 @@ NEVER edit `state/state.json` while `process.py` is running: it saves its in-mem
   day, use `--tomorrow`.
 - Play content (Logic+ songs, movement, feelings and habits) is assigned only when settings `include_play` is true;
   otherwise only the cognitive Logic+ categories are. Settings `exclude_titles` removes specific lessons.
-- Diff into creates, moves and parks in one list-order pass, then verify and repair rounds. See Speed design.
+- Diff into creates, moves and unassigns in one list-order pass, then verify and repair rounds. See Speed design.
   `EXACT_DAYS` = 2: today and tomorrow are mirrored exactly. A wanted lesson already sitting on any later day stays put,
   because the student can't see it until its date and each run re-aligns the next two days. This avoids many re-dates
   every time a day is skipped.
