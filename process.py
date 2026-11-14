@@ -110,7 +110,7 @@ def read_assignments():
     att = state.setdefault("attempts", {})                                   # record WHEN each score appeared
     for r in rows:
         k = f"{r['title']}|{r['level']}"
-        if r["done"] and r["score"] is None and not att.get(k):        # unscored + done = viewed; remember it ourselves, because
+        if r["done"] and r["score"] is None and (not att.get(k) or (att[k].get("viewed") and r["date"] and att[k].get("date", "") < r["date"] <= TODAY.isoformat())):   # unscored + done = viewed (a repeat counts on its new date); remember it ourselves, because
             att[k] = {"score": None, "date": min(r["date"] or TODAY.isoformat(), TODAY.isoformat()), "viewed": True}   # re-dating resets the check
         if r["done"] and r["score"] is not None and att.get(k, {}).get("score") != r["score"]:
             first = att.get(k, {}).get("first", att.get(k, {}).get("score", r["score"]))   # probes are judged on the FIRST attempt

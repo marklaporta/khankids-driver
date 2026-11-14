@@ -494,6 +494,7 @@ def plan(catalog, rows, state, horizon, caps=None):
                     strand_of(w) == strand_of(v) and w["pos"] < v["pos"] and w["status"] == "needs_work" and not solid(w) for w in les.values()): continue
             a = attempts.get(f"{t}|{lv}", {})
             if repeat_ok and a.get("score") is not None and a["score"] >= MASTERY and a.get("date", "") >= f["date"]: continue   # passed since the focus began
+            if repeat_ok and a.get("viewed") and a.get("date", "") >= f["date"]: continue   # unscored lesson finished again since the focus began
             if lv == "Main" and not repeat_ok and (v["status"] not in ("new", "needs_work") or (v["status"] == "new" and not gate(v))): continue
             if lv != "Main" and lv not in v.get("levels", [lv]): continue
             if n >= fmax: break
