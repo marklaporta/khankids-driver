@@ -6,7 +6,6 @@ import fill; print("now at:", fill.finish())
 # hand-back is complete; also stop the WDA runner so the "Automation Running" overlay leaves the iPad (parent 9/16)
 import subprocess, os
 import kk
-if kk.IPHONE:   # WDA turns the phone's autocorrect + predictive text off at startup; give them back to the parent (11/7)
-    try: kk._req(f"/session/{kk.SID}/appium/settings", {"settings": {"keyboardAutocorrection": True, "keyboardPrediction": True}})
-    except Exception as ex: print("could not restore keyboard settings:", ex)
+# The runner is built with configureDefaultKeyboardPreferences disabled (WebDriverAgentRunner/UITestingUITests.m, 11/14), so it
+# never touches the device owner's autocorrect / predictive text; nothing to restore here.
 subprocess.run([os.path.join(kk.D, "stop-wda-iphone.sh" if kk.IPHONE else "stop-wda.sh")])

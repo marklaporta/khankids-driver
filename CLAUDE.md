@@ -21,6 +21,9 @@ detail in a tracked file. `state/` and `plans/` hold the student's data and are 
   (screen = origin + scale * tree coords). Dialogs are in the tree. Per-device geometry lives in `kk.G`.
 - Gotcha: in the Assign dialog the date pencil moves with the date text width; never use a fixed coordinate for it.
   `shot` saves `NAME.png` and a 1000px `NAMEs.png` in `.session/`; scaled px * 1.18 = points.
+- WDA patch (keep it on every rebuild or WDA update): comment out `configureDefaultKeyboardPreferences` in
+  `WebDriverAgentRunner/UITestingUITests.m`. Stock WDA turns the device's Auto-Correction and Predictive Text off at every
+  start and never turns them back on; a parent's phone must come back exactly as it was. The scripts no longer touch keyboard settings.
 - If the runner fails after an iOS/Xcode update, rebuild with `xcodebuild build-for-testing` using the same project,
   destination and signing arguments as the start script.
 

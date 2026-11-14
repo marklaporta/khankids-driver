@@ -34,7 +34,7 @@ for i in $(seq 1 120); do
     curl -s -X POST $URL/session -H 'Content-Type: application/json' \
       -d '{"capabilities":{"alwaysMatch":{}}}' | python3 -c "import sys,json; print(json.load(sys.stdin)['sessionId'])" > "$S/sid"
     curl -s -m 10 -X POST "$URL/session/$(cat $S/sid)/appium/settings" -H 'Content-Type: application/json' \
-      -d '{"settings":{"waitForIdleTimeout":0,"animationCoolOffTimeout":0,"snapshotMaxDepth":25,"useFirstMatch":true,"customSnapshotTimeout":5,"keyboardAutocorrection":true,"keyboardPrediction":true}}' \
+      -d '{"settings":{"waitForIdleTimeout":0,"animationCoolOffTimeout":0,"snapshotMaxDepth":25,"useFirstMatch":true,"customSnapshotTimeout":5}}' \
       | grep -q waitForIdleTimeout && echo "WDA settings applied (no idle wait)" || echo "WARNING: WDA settings not applied"
     echo "WDA ready, session $(cat $S/sid), scratch $S"; exit 0
   fi
