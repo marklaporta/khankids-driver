@@ -43,7 +43,9 @@ Ask, and explain where something is missing:
 - Ask for the Apple team id (Xcode > Settings > Accounts, or the error message of a first build) and a bundle id they
   own, e.g. `com.<their-name>.WebDriverAgentRunner`.
 - `git clone https://github.com/appium/WebDriverAgent.git` into `WebDriverAgent/` (or `WebDriverAgent-iphone/` for the
-  iPhone). Build once with `xcodebuild build-for-testing`, using the project, scheme, destination and signing arguments
+  iPhone). Before building, comment out `[FBConfiguration.sharedInstance configureDefaultKeyboardPreferences];` in
+  `WebDriverAgentRunner/UITestingUITests.m`: stock WDA turns the device's Auto-Correction and Predictive Text off at every
+  start and never restores them (see CLAUDE.md). Build once with `xcodebuild build-for-testing`, using the project, scheme, destination and signing arguments
   from the start script. On the first launch the device asks the parent to trust the developer app (Settings > General >
   VPN & Device Management).
 - Write `local.env` from `local.env.example`. Then run the start script and check that it prints "WDA ready" and "WDA
