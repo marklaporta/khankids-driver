@@ -417,7 +417,8 @@ def plan(catalog, rows, state, horizon, caps=None):
         strand = below_strand(v)
         if strand is None: held.append((v["title"], f"unmapped strand '{cat}' (add it to PREREQ_MAPS)")); return False
         if not strand and cat not in PREREQ_MAPS.get((base, g), {}): return True      # nothing is read a grade down
-        gaps = [w["title"] for w in strand if w["status"] != "viewed" and not proven(w)]   # unscored: no evidence either way
+        # a same-titled lesson exists once per grade but only its lowest-grade copy is ever assigned: judge the title by that copy
+        gaps = [w["title"] for w in (by_title.get(x["title"], x) for x in strand) if w["status"] != "viewed" and not proven(w)]   # unscored: no evidence either way
         if gaps:
             why = "blocked by hold" if any(held_title(t) for t in gaps) else "hole"
             held.append((v["title"], f"{why}: {', '.join(gaps[:3])}")); return False
