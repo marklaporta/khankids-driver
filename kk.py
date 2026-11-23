@@ -50,7 +50,7 @@ G = dict(
     iphone=dict(row_title_x=112, row_top=140, row_bot=10000, row_date_dy=(10, 18), row_lv_x=(60, 80), row_lv_dy=(16, 23),
               row_score_x=200, row_score_dy=(15, 8), row_check_dy=(0, 10), thumb=(84, 10), row_tap=(150, 395),
               cat_x=88, title_x=99, score_x=238, list_top=150, list_bot=10000, vis_lo=160, vis_hi=400,
-              drag_x=150, page=(410, 190), nudge=120, fling=(170, 420), hdr_y=125, subj_pen=(95, 120),
+              drag_x=150, page=(410, 190), cat_page=(415, 35), cat_top=55, nudge=120, fling=(170, 420), hdr_y=125, subj_pen=(95, 120),
               dlg_date_y=(160, 200), dlg_pen_y=(160, 200), student_box_y=195, dlg_save_y=100,
               cal_hdr_y=80, cal_left_x=(250, 684), cal_cells_x=(260, 684), cal_right_cells_x=(684, 1100), cal_cell_y=110, cal_save_y=330,
               gate=((600, 220), (360, 220), (478, 120), (478, 330))),
@@ -79,7 +79,8 @@ def swipe(x1, y1, x2, y2, d=0.3):
     _req(f"/session/{SID}/wda/dragfromtoforduration", {"fromX": x1, "fromY": y1, "toX": x2, "toY": y2, "duration": d})
 
 def tree():
-    d = _req(f"/session/{SID}/source?format=json")["value"]
+    # visibility/accessibility/enabled are computed per node and cost half the read (iPhone 11/23: 1.7 s -> 0.8 s); nothing here uses them
+    d = _req(f"/session/{SID}/source?format=json&excluded_attributes=visible,accessible,enabled")["value"]
     out = []
     def walk(n):
         t = n.get("type", ""); l = (n.get("label") or n.get("name") or "").split("/")[-1]
@@ -503,6 +504,13 @@ def _drag(x, y1, y2, ms, hold):
     _req(f"/session/{SID}/actions", {"actions": [{"type": "pointer", "id": "f1", "parameters": {"pointerType": "touch"}, "actions": [
         {"type": "pointerMove", "duration": 0, "x": x, "y": y1}, {"type": "pointerDown", "button": 0},
         {"type": "pointerMove", "duration": ms, "x": x, "y": y2}, {"type": "pause", "duration": hold}, {"type": "pointerUp", "button": 0}]}]})
+def drag_settle(x, y1, y2, fast=200, slow=150, tail=30, hold=100):
+    """Drag that ends slowly, so the list stops where the finger lifts (iPhone 11/23: a fast drag with a hold still flung
+    another 70-140 points; this profile lands within a few points, 0.95 s per call). Scroll distance ~ drag minus ~50 points of touch slop."""
+    _req(f"/session/{SID}/actions", {"actions": [{"type": "pointer", "id": "f1", "parameters": {"pointerType": "touch"}, "actions": [
+        {"type": "pointerMove", "duration": 0, "x": x, "y": y1}, {"type": "pointerDown", "button": 0},
+        {"type": "pointerMove", "duration": fast, "x": x, "y": y2 + (tail if y2 < y1 else -tail)},
+        {"type": "pointerMove", "duration": slow, "x": x, "y": y2}, {"type": "pause", "duration": hold}, {"type": "pointerUp", "button": 0}]}]})
 def page_down():
     """Advance a report list ~17 rows with a 3-row overlap, so no row is ever skipped (measured 10/10: ~1.25 s vs 2.3 s swipe)."""
     _drag(G["drag_x"], G["page"][0], G["page"][1], 350, 200)
