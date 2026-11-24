@@ -17,6 +17,7 @@ def where():
     try:
         if kk.q(ST + '(label BEGINSWITH "Class Report")'): return "report"
         if kk.q('name CONTAINS "ClassReport"'): return "teacher"
+        if kk.q('name CONTAINS "libraryteacher_students_btn"'): return "teacher tab"     # another tab of the teacher home (Search, Books...)
         if kk.q(ST + kk.lbl("Teacher Settings")): return "settings"
         if kk.q(ST + kk.lbl("Sign Out")) and kk.q(ST + kk.lbl(kk.TEACHER_NAME)): return "picker"
         if kk.q('name CONTAINS "SiteMap"') or kk.q('name CONTAINS "Library"'): return "student"
@@ -29,6 +30,8 @@ def enter_teacher():
     if not kk.TEACHER_NAME: raise RuntimeError("set KK_TEACHER_NAME in local.env (see local.env.example)")
     kk.foreground()
     w = where()
+    if w == "teacher tab":                              # back to the Students tab, which holds the Class Report button
+        kk.click(kk.q('name CONTAINS "libraryteacher_students_btn"')); kk.wait_for('name CONTAINS "ClassReport"', 4); w = where()
     if w == "teacher": return
     if w in ("report", "settings"):
         b = kk.q('type == "XCUIElementTypeImage" AND name CONTAINS "sandbox_back_btn"')
