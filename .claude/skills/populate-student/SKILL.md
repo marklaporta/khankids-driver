@@ -130,7 +130,11 @@ Measured on the iPhone, 11/23: a nightly run of 15 changes takes about 2.5 minut
     rounds. Success is `VERIFIED: app matches the plan`. `WARNING: N differences remain` must be investigated.
 - The iPad path shares all of this code but its new timings (strokes, jumps) are not yet measured: `G["ipad"]` has no `jump`
   calibration, so lists move by strokes only there. Calibrate it with a profiled run before relying on the numbers above.
-- Untested idea: the teacher Search tab might jump straight to a lesson by name. Test it once by hand before building on it.
+- Tried and rejected (11/23): the teacher Search tab. It searches by STANDARD only (Choose Standard > framework > domain > standard,
+  e.g. Head Start Preschool > P-LIT > P-LIT (All)), not by name. Results are a thumbnail grid with one thumbnail per level
+  (tapping one opens the same Assign dialog, 1.9 s), but a domain's grid is ~23,000 points long (Uppercase Letters at ~17,700 vs
+  ~2,350 in All Progress), it needs 4-5 taps to reach, shows no scores, and a lesson sits under several standards. All Progress
+  with `find_lesson` stays faster.
 
 NEVER edit `state/state.json` while `process.py` is running: it saves its in-memory copy at the end and overwrites the edit.
 
