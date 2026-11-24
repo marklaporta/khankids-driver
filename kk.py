@@ -480,11 +480,11 @@ def date_ok(text, m, d):
 def pick_date(m, d):
     """The calendar is open (two month panes; on the iPhone the right one is off-screen). Brings month m into the LEFT pane
     (taps in the right pane don't always register), taps the day and the calendar's Save. Raises rather than guessing."""
-    for _ in range(14):
+    for _ in range(16):
         t = tree()
         left = next((e for e in t if e[0] == "StaticText" and e[3] < G["cal_hdr_y"] and e[1].split(" ")[0] in MONTH_NAMES[1:]
                      and G["cal_left_x"][0] < e[2] < G["cal_left_x"][1]), None)
-        if not left: time.sleep(0.2); continue
+        if not left or not any(e[0] == "StaticText" and e[1] == "Cancel" for e in t): time.sleep(0.15); continue   # not open yet
         lm = MONTH_NAMES.index(left[1].split(" ")[0])
         if lm == m:
             cell = next((e for e in t if e[0] == "StaticText" and e[1] == "%02d" % d and G["cal_cells_x"][0] < e[2] < G["cal_cells_x"][1]
@@ -493,17 +493,17 @@ def pick_date(m, d):
             if not cell or not save: raise RuntimeError(f"day {m}/{d} or the calendar's Save not found")
             tap_el(cell); tap_el(save); return
         name = "onboarding_avatar_next_btn" if (m - lm) % 12 <= 6 else "onboarding_avatar_back_btn"   # step the LEFT pane toward m
-        arrows = sorted((e for e in t if e[0] == "Image" and name in e[1]), key=lambda e: e[2])
-        if not arrows: raise RuntimeError(f"month {m} not on screen (left month={lm}) and no arrow")
-        tap_el(arrows[0]); time.sleep(0.2)
+        # every month of the pager has its own arrows (off-screen ones too): use the LEFT pane's, inside its header
+        arrow = next((e for e in t if e[0] == "Image" and name in e[1] and left[2] - 20 <= e[2] <= left[2] + left[4]), None)
+        if not arrow: raise RuntimeError(f"month {m} not on screen (left month={lm}) and no arrow")
+        tap_el(arrow); time.sleep(0.2)
     raise RuntimeError(f"month {m} not reached")
 
 def set_dialog_date(m, d, s):
     """Open the dialog's calendar (s = dialog_state), pick m/d, and return the dialog's new state, read back from the screen."""
     if not s["pen"]: raise RuntimeError("date pencil not found")
     tap_el(s["pen"])
-    if not _until(lambda t: any(e[0] == "StaticText" and e[1] == "Cancel" for e in t), 3): raise RuntimeError("calendar did not open")
-    pick_date(m, d)
+    pick_date(m, d)                                     # its first reads wait for the calendar to open
     t = _until(lambda t: not any(e[0] == "StaticText" and e[1] == "Cancel" for e in t) and dialog_in(t), 3)
     if not t: raise RuntimeError("calendar did not close")
     return dialog_state(t)
@@ -517,11 +517,9 @@ def _save(s):
     if not wait_for(DIALOG, 4, gone=True): return "dialog stayed open after Save"
     return None
 
-def fast_create2(title, level, m, d, state=None):
-    """Assign title@level to the student on m/d, or re-date the existing assignment (one assignment per lesson and level: its
-    dialog opens with the student already checked). Returns 'created' | 'redated' (also when the date was already right) | an error."""
-    err, t = open_assign_dialog(title, level)
-    if err: return err
+def _assign_in(t, m, d):
+    """An open Assign dialog (tree t): make sure the student is checked and the date is m/d, then Save.
+    Returns 'created' | 'redated' (also when nothing needed changing) | an error."""
     s = dialog_state(t)
     if not s["box"]: close_dialog(t); return "checkbox not found"
     existing = s["checked"]
@@ -535,13 +533,10 @@ def fast_create2(title, level, m, d, state=None):
         try: s = set_dialog_date(m, d, s)
         except Exception as ex: return f"pick failed: {ex}"
         if not date_ok(s["date"], m, d): return f"date mismatch: {s['date']}"     # never save on the wrong day
-    if state is not None: state["date"] = (m, d)
     return _save(s) or ("redated" if existing else "created")
 
-def unassign(title, level):
-    """Remove the student's assignment of title@level: open its dialog, uncheck the student, Save."""
-    err, t = open_assign_dialog(title, level)
-    if err: return err
+def _unassign_in(t):
+    """An open Assign dialog (tree t): uncheck the student and Save."""
     s = dialog_state(t)
     if not s["checked"]: close_dialog(t); return "not assigned"
     tap_el(s["box"])
@@ -549,9 +544,29 @@ def unassign(title, level):
     if not t: close_dialog(); return "checkbox did not uncheck"
     return _save(dialog_state(t)) or "unassigned"
 
+def fast_create2(title, level, m, d, state=None):
+    """All Progress: assign title@level to the student on m/d, or re-date the existing assignment (one assignment per lesson and
+    level: its dialog opens with the student already checked). Returns 'created' | 'redated' | an error."""
+    err, t = open_assign_dialog(title, level)
+    return err or _assign_in(t, m, d)
+
+def unassign(title, level, tab="All Progress", date=None):
+    """Remove the student's assignment of title@level (open its dialog, uncheck the student, Save), from either report tab."""
+    err, t = (open_assignment(title, level, date) if tab == "Assignments" else open_assign_dialog(title, level))
+    return err or _unassign_in(t)
+
+def move(title, level, m, d, date=None):
+    """Assignments tab: re-date an existing assignment. Its row is near the top of the list when it is dated in the plan's window
+    (the list is newest date first), so this skips the grade/subject switch and the long trip down All Progress."""
+    err, t = open_assignment(title, level, date)
+    return err or _assign_in(t, m, d)
+redate = move                                           # the old name (nightly.py, process.py's fallback)
+
 # ---------------------------------------------------------------------------------------------------------------------
-# The Assignments report (read by process.py; re-dating there is only a fallback)
+# The Assignments report: read by process.py; moves and unassigns of existing assignments run here
 # ---------------------------------------------------------------------------------------------------------------------
+import re
+_DATE_LINE = re.compile(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?,? ")
 def rows(t=None):
     """Assignment rows: [(title, level, date, y_tree)] in the list (between G row_top and row_bot)."""
     t = t or tree()
@@ -560,44 +575,65 @@ def rows(t=None):
     levels = {round(e[3]): e[1] for e in texts_ if lx0 <= e[2] < lx1 and e[1] in LEVELS}
     out = []
     for e in texts_:
-        if e[2] == tx and G["row_top"] <= e[3] < G["row_bot"] and e[1] not in ("", "Today", "Tomorrow", "Yesterday") and not e[1].startswith(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
+        if e[2] == tx and G["row_top"] <= e[3] < G["row_bot"] and e[1] not in ("", "Today", "Tomorrow", "Yesterday") and not _DATE_LINE.match(e[1]):
             title, y = e[1], e[3]
             date = next((x[1] for x in texts_ if x[2] == tx and dy0 <= x[3] - y <= dy1), "?")
             level = next((lv for ly, lv in levels.items() if ly0 <= ly - y <= ly1), "?")
             out.append((title, level, date, y))
     return out
 
-def find_row_lv(title, level, max_scroll=60):
-    """Assignments tab: scroll until a row with this title AND level is on screen; return its tree y or None."""
-    wrapped = False; last = None
-    for _ in range(max_scroll):
-        rs = rows()
-        for t, l, dt, y in rs:
-            if t == title and l == level and G["row_tap"][0] <= y < G["row_tap"][1]: return y   # on screen only (the phone's tree holds off-screen rows)
-        sig = tuple(r[0] for r in rs)
-        if sig and sig == last:
-            if wrapped: return None
-            scroll_top(); wrapped = True; last = None; continue
-        if sig: last = sig
-        page_down()
-    return None
+_MON = {m[:3]: i for i, m in enumerate(MONTH_NAMES) if m}
+def row_date(text):
+    """An Assignments row's date line ('Mon., Nov. 30', 'Today', 'Tomorrow', 'Yesterday') as a date, or None."""
+    if text == "Today": return TODAY
+    if text == "Tomorrow": return TODAY + datetime.timedelta(days=1)
+    if text == "Yesterday": return TODAY - datetime.timedelta(days=1)
+    p = text.replace(".", "").replace(",", "").split()
+    try: return _date_of(_MON[p[1]], int(p[2]))
+    except Exception: return None
 
-def redate(title, level, m, d):
-    """Edit an EXISTING assignment from the Assignments tab to a new date; level-aware."""
-    if not q(ST + lbl("Class Report: Assignments")): return "not on Assignments report"
-    y = find_row_lv(title, level)
-    if y is None: return "row not found"
+def find_assignment(title, level, date=None, max_steps=40):
+    """Assignments tab: bring the row title@level on screen; returns (row, tree) or (None, None). The list is newest date first
+    and, like All Progress, jumps back to its top whenever a dialog closes. With the row's current `date` (process.py knows it)
+    the dates in view say which way to go; without it the search starts at the top, where the plan's week is. Steps are ~300
+    points, inside the ~385 points of rows the tree holds, so consecutive reads overlap and no row is skipped."""
+    lo, hi = G["row_tap"]; mid = (lo + hi) // 2
+    last = None; topped = False; prev = None; first = True; inside = 0   # inside: steps taken past rows of its own date
+    for _ in range(max_steps):
+        t = tree(); rs = rows(t)
+        r = next((x for x in rs if x[0] == title and x[1] == level), None)
+        if r:
+            if lo <= r[3] <= hi - 25:
+                if IPHONE or (prev is not None and abs(prev - r[3]) < 1): return r, t   # see find_lesson: two reads on the iPad
+                prev = r[3]; continue
+            prev = None; scroll_by(r[3] - mid); continue
+        prev = None
+        ds = [d for d in (row_date(x[2]) for x in rs) if d]
+        if date and ds:
+            if date > max(ds) or (date == max(ds) and inside < 2): scroll_by(-300); inside += date == max(ds); continue   # above
+            if date < min(ds) or (date == min(ds) and inside < 2): scroll_by(300); inside += date == min(ds); continue    # below
+            return None, None                           # its date is in view but the row isn't: no such assignment any more
+        if first and not topped: scroll_top(); topped = True; first = False; continue
+        first = False
+        sig = tuple(x[:3] for x in rs)
+        if sig == last:                                 # the end of the list
+            if topped: return None, None
+            scroll_top(); topped = True; last = None; continue
+        last = sig; scroll_by(300)
+    return None, None
+
+def open_assignment(title, level, date=None):
+    """Assignments tab: open the Assign dialog of an existing assignment (dated `date`, if known) from its row's thumbnail.
+    Returns (None, tree) or (error, None)."""
+    if not q(ST + lbl("Class Report: Assignments")): return "not on Assignments report", None
+    r, t = find_assignment(title, level, date)
+    if not r: return "row not found", None
     tx, ty = G["thumb"]
-    tap_tree(tx, y + ty)
+    tap_tree(tx, r[3] + ty)
     t = _until(dialog_in, 3)
-    if not t:
-        tap_tree(tx, y + ty); t = _until(dialog_in, 3)
-        if not t: return "dialog did not open"
-    if not dialog_is(title, level, t): close_dialog(t); return "wrong dialog"
-    try: s = set_dialog_date(m, d, dialog_state(t))
-    except Exception as ex: return f"pick failed: {ex}"
-    if not date_ok(s["date"], m, d): return f"date mismatch: {s['date']}"
-    return _save(s) or "redated"
+    if not t: return "dialog did not open", None
+    if not dialog_is(title, level, t): close_dialog(t); return "wrong dialog", None   # never touch another lesson's assignment
+    return None, t
 
 # Report order (Preschool Age 3, captured 2026-09-07), used by fill.main (the older planner's create pass).
 _ELA = (["Title & Author", "Book Pages", "Words on Signs 1", "Words on Signs 2", "Rhyming", "Hear Syllables", "Blend Syllables",

@@ -72,8 +72,9 @@ COPY of state (overlay + mark_done as in process.py), including what-if attempts
    for hole-filling.
 
 ## Speed design
-Measured on the iPhone, 11/23: a nightly run of 15 changes takes about 2.5 minutes (`APPLIED in N min`); a full catalog read of
-10 reports about 2 minutes. Per change: ~4 s to re-date or unassign, ~7-8 s when the calendar is needed.
+Measured on the iPhone, 11/23: a full catalog read of 10 reports takes about 2 minutes (`APPLIED in N min` reports a run's total).
+Per change: an unassign ~2.5 s, a re-date ~5-6 s with the calendar (Assignments tab); a new assignment ~5-11 s (All Progress,
+including a report switch when its subject changes).
 - Measure before optimizing: `KK_PROFILE=1` times every category of device action (requests by type, sleeps by function,
   inclusive/self time per function) and writes `state/profile-*.txt`; `KK_TRACE=1` also prints every request as it happens.
 - No idle waits. The start scripts post `/appium/settings`: waitForIdleTimeout 0, animationCoolOffTimeout 0,
@@ -83,6 +84,8 @@ Measured on the iPhone, 11/23: a nightly run of 15 changes takes about 2.5 minut
   (`kk.dialog_state`), the calendar's month and days, and the All Progress scroll offset (`kk.header_row`). A predicate query
   (`kk.q`, 0.1-0.2 s) answers one question, so it is only for one-off checks. Every tap is a W3C touch (~0.45 s, the floor:
   XCTest waits for the event to be delivered); taps are now the largest cost, about 7 per change.
+  Tried, no gain: a lower `snapshotMaxDepth` (the deepest element used is 13 levels down; reads cost the same down to 14, and
+  12 loses the dialog) and excluding more attributes (~0.17 s is the floor; XML and description sources are slower).
 - Moving through a list: `kk.drag_settle` is a drag that ends slowly, so the list stops where the finger lifts (no momentum,
   ~0.8 s for ~360 points). Long distances are flicks caught by a stroke (`kk.travel`, calibrated in `G["jump"]`: 1, 2, 3 flicks
   = 1540, 2625, 3760 points in 1.5, 2.3, 3.0 s). A plain touch must never stop a moving list: it opens the row under it.
@@ -91,16 +94,18 @@ Measured on the iPhone, 11/23: a nightly run of 15 changes takes about 2.5 minut
   change travels from the top. The catalog read records each lesson's place in its list (`pos`); the target's distance from
   the nearest row in view says how far to travel, in either direction. A lesson missing from the catalog falls back to paging
   down, then wrapping to the top once; the end of a list is one drag that changed nothing.
-- One pass per report, grouped by date: creates, moves and unassigns in one pass through All Progress (`fill.main_ordered`),
-  creates and moves first, then unassigns. Within a report the changes go by date: a new assignment's dialog offers the last
-  date picked, so same-day creates in a row skip the calendar. Operations are creates, moves of existing assignments, and
-  unassigns: anything assigned, unfinished and dated from the start of the plan on that the plan doesn't want is removed
-  (`kk.unassign`: open its dialog, uncheck the student, Save). The plan lives in `state/`, so the app never holds a parking
-  pool. Unassigned rows also leave `state/assign-cache.json` (and the incremental read prunes cached rows in its re-read range
-  that the app no longer shows).
+- Two passes (`fill.main_ordered`, one tab each). Operations are creates, moves of existing assignments, and unassigns:
+  anything assigned, unfinished and dated from the start of the plan on that the plan doesn't want is removed (open its
+  dialog, uncheck the student, Save). The plan lives in `state/`, so the app never holds a parking pool. Unassigned rows also
+  leave `state/assign-cache.json` (and the incremental read prunes cached rows in its re-read range that the app no longer shows).
+  1. Moves and unassigns on the Assignments tab (`kk.move`, `kk.unassign(..., "Assignments")`). The read leaves the app there,
+     and the list is newest date first, so the plan's week is its top ~35 rows: no grade/subject switch, no trip down a long
+     report. `kk.find_assignment` steers by the dates in view (process.py passes each row's current date in the TSV's 6th
+     column); its steps of ~300 points stay inside the ~385 points of rows the tree holds.
+  2. Creates, and whatever the Assignments tab could not do, through All Progress: one pass per report; within a report by
+     date, since a new assignment's dialog offers the last date picked, so same-day creates in a row skip the calendar.
   - Existing assignment: the dialog opens with the student's checkbox already checked. Khan Kids has one assignment per
-    lesson and level. `fast_create2` changes its date in place, or closes it if the date is already right.
-  - The Assignments-tab `kk.redate` is only a fallback.
+    lesson and level. The shared dialog steps (`kk._assign_in`) change its date in place, or close it if the date is right.
   - The dialog's date is read before every Save, and the calendar opens only when it is wrong.
   - Trade-off: within a day the student sees lessons in the app's list order, not a custom order.
 - Switching report (`kk.set_subject`): nothing to do when the header row already shows it; otherwise taps only the options not
@@ -130,6 +135,8 @@ Measured on the iPhone, 11/23: a nightly run of 15 changes takes about 2.5 minut
     rounds. Success is `VERIFIED: app matches the plan`. `WARNING: N differences remain` must be investigated.
 - The iPad path shares all of this code but its new timings (strokes, jumps) are not yet measured: `G["ipad"]` has no `jump`
   calibration, so lists move by strokes only there. Calibrate it with a profiled run before relying on the numbers above.
+- The calendar is a sideways pager: every month (off-screen ones too) has its own arrows, so `pick_date` steps with the
+  arrows of the month in the LEFT pane.
 - Tried and rejected (11/23): the teacher Search tab. It searches by STANDARD only (Choose Standard > framework > domain > standard,
   e.g. Head Start Preschool > P-LIT > P-LIT (All)), not by name. Results are a thumbnail grid with one thumbnail per level
   (tapping one opens the same Assign dialog, 1.9 s), but a domain's grid is ~23,000 points long (Uppercase Letters at ~17,700 vs

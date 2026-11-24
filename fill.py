@@ -2,7 +2,7 @@
 """Resilient filler: creates assignments from a subject-tagged TSV, date-major so the dialog's remembered
 date is reused, and restarts WDA + re-enters the teacher view if the connection dies.
 usage: python3 fill.py PLAN.tsv LOG"""
-import sys, os, time, subprocess, importlib
+import sys, os, time, subprocess, importlib, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); sys.argv = [sys.argv[0], "none"] + sys.argv[1:]
 import kk
 ST = 'type == "XCUIElementTypeStaticText" AND '
@@ -108,27 +108,29 @@ def finish():
     if su: kk.click(su); time.sleep(2)
     return where()
 
-def on_report():
-    """On Class Report > All Progress? One predicate query, no tree dump."""
-    return kk.q(ST + 'label == "Class Report: All Progress"') is not None
+def on_report(tab="All Progress"):
+    """On Class Report > tab? One predicate query, no tree dump."""
+    return kk.q(ST + f'label == "Class Report: {tab}"') is not None
 
 TRUSTED = False                                         # the last operation succeeded: still on the report, no need to re-check
-def ensure(subject):
+def ensure(subject, tab="All Progress"):
+    """On the report tab (and, for All Progress, the subject) after any interruption; restarts WDA if it died. True if it had to
+    (re)open the report."""
     kk.wait_unlocked()
     if alive():
-        if TRUSTED or on_report(): return False
-        open_report("All Progress"); kk.set_subject(subject); return True
-    print("WDA down -> restarting", flush=True)
-    subprocess.run([kk.START], env={**os.environ, "SCRATCH": kk.SESS}, check=True, capture_output=True)
-    kk.SID = open(f"{kk.SESS}/sid").read().strip()
-    open_report("All Progress"); kk.set_subject(subject)
+        if TRUSTED or on_report(tab): return False
+    else:
+        print("WDA down -> restarting", flush=True)
+        subprocess.run([kk.START], env={**os.environ, "SCRATCH": kk.SESS}, check=True, capture_output=True)
+        kk.SID = open(f"{kk.SESS}/sid").read().strip()
+    open_report(tab)
+    if tab == "All Progress": kk.set_subject(subject)
     return True
 
-def main_ordered(path, log):
-    """One pass per report subject, rows already sorted by their position in that subject's list, so each find only scrolls
-    a little further. Creates new assignments, re-dates existing ones (pre-checked dialog) and unassigns (m/d = 0/0)
-    in the same pass.
-    Returns {(title, level, m, d): result}."""
+def main_ordered(path, log, tab="All Progress"):
+    """Apply a TSV of changes (subject, title, level, m, d; m/d = 0/0 unassigns) in its order, through one report tab:
+    "All Progress" (any change; one pass per subject) or "Assignments" (re-dates and unassigns of existing assignments).
+    Rerunning with the same log skips what is already done. Returns {(title, level, m, d): result}."""
     global TRUSTED
     plan = [l.rstrip("\n").split("\t") for l in open(path) if l.strip() and not l.startswith("#")]
     done = set()
@@ -138,15 +140,18 @@ def main_ordered(path, log):
             if f[0] in ("created", "redated", "unassigned"): done.add(tuple(f[1:5]))
     cur = None; state = {"date": None}; results = {}
     with open(log, "a") as out:
-        for subj, title, level, m, d in plan:
+        for subj, title, level, m, d, *cur_date in plan:   # an optional 6th column: the assignment's current date (ISO)
+            cur_date = datetime.date.fromisoformat(cur_date[0]) if cur_date and cur_date[0] else None
             if (title, level, m, d) in done: results[(title, level, m, d)] = "done before"; continue
             t0 = time.time(); res = None
             for attempt in (1, 2):
                 try:
-                    if ensure(subj): cur = subj
-                    if cur != subj:
-                        kk.set_subject(subj); cur = subj         # find_lesson steers from wherever the list is
-                    res = kk.unassign(title, level) if m == "0" else kk.fast_create2(title, level, int(m), int(d), state)
+                    if ensure(subj, tab): cur = subj
+                    if tab == "Assignments":
+                        res = kk.unassign(title, level, tab, cur_date) if m == "0" else kk.move(title, level, int(m), int(d), cur_date)
+                    else:
+                        if cur != subj: kk.set_subject(subj); cur = subj         # find_lesson steers from wherever the list is
+                        res = kk.unassign(title, level) if m == "0" else kk.fast_create2(title, level, int(m), int(d), state)
                 except Exception as ex:
                     res = f"error {ex!r}"; time.sleep(1)
                 TRUSTED = res in ("created", "redated", "unassigned", "not assigned")

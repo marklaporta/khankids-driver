@@ -3,9 +3,9 @@
  1. read their progress: All Progress catalog (full read weekly, or --full-catalog) + Assignments report (incremental since last run)
  2. planner.plan(): 5 lessons/day (gates first) over the horizon (needs-work retries + next new lessons, hole-filling, mastery-based grades)
  3. (no sticky step: the plan is authoritative and the app mirrors it exactly)
- 4. ONE pass per report subject in list order through All Progress: creates new assignments, re-dates existing ones
-    (pre-checked dialog), unassigns anything else still open from the start of the plan on (no parking pool, 11/14).
-    Assignments-tab re-date only as a fallback.
+ 4. apply: re-dates and unassigns of existing assignments on the Assignments tab (the plan's week is the top of that list),
+    then creates (and anything the tab couldn't do) through All Progress, one pass per report. Anything assigned, unfinished and
+    dated from the start of the plan on that the plan doesn't want is unassigned (no parking pool, 11/14).
  5. finish: print the plan; verify with `process.py --preview` (moves/creates/unassigns all 0).
 Usage: nohup python3 -u process.py [--preview] [--tomorrow] [--full-catalog] [--full-scan] > state/process.out 2>&1 &"""
 import sys, os, json, time, datetime, subprocess
@@ -152,15 +152,6 @@ def safe_open(tab):
         except Exception as ex: print(f"open_report({tab}) failed: {ex!r}; retrying", flush=True); time.sleep(3)
     raise RuntimeError(f"could not open {tab}")
 
-def fallback_redate(ops, log):
-    """Assignments-tab re-date for anything the All Progress pass could not reach."""
-    if not ops: return
-    safe_open("Assignments")
-    for t, lv, d in ops:
-        try: kk.scroll_top(); res = kk.redate(t, lv, d.month, d.day)
-        except Exception as ex: res = f"error {ex!r}"
-        log.write(f"fallback\t{res}\t{t}\t{lv}\t{d}\n"); log.flush(); print("fallback", res, t, lv, d, flush=True)
-
 def main():
     t0 = time.time()
     latest = catalog(); cat = overlay(latest)
@@ -206,7 +197,7 @@ def main():
             elif CLEAR_DONE_TODAY and r["done"] and r["date"] == TODAY.isoformat() and k not in want:
                 ops.append((lowest.get(k[0]), k[0], k[1], None, "unassign"))      # finished today: out of their view (score kept in state attempts)
         return ops
-    ops = diff(rows)
+    ops = diff(rows); cur_dates = {(r["title"], r["level"]): r["date"] for r in rows}
     print(f"\n== plan {horizon[0]} .. {horizon[-1]} ==")
     for d, xs in days.items():
         print(f"  {d.strftime('%a %m/%d')}: " + "; ".join(x["title"] + ("" if x["level"] == "Main" else f" ({x['level']})")
@@ -216,32 +207,38 @@ def main():
     json.dump({d.isoformat(): xs for d, xs in days.items()}, open(f"{D}/state/plan-{TODAY}.json", "w"), indent=1)
     if PREVIEW: save_state(); print("(preview only; nothing changed in the app)"); return
 
-    log = open(f"{D}/state/process-{TODAY}.log", "a")
     order = list(kk.REPORTS)
     pos = {(c["subject"], c["title"]): i for i, c in enumerate(cat)}
     for rnd in range(3):
         if not ops: break
         if rnd: print(f"\nrepair round {rnd}: {len(ops)} differences after re-read: {[(o[1], o[2], str(o[3]), o[4]) for o in ops]}", flush=True)
-        # what the child will see first: creates + moves in one list-order pass, then a second pass for the unassigns
-        # within a report, by date: the list jumps back to its top after every dialog anyway, and a new assignment's dialog
-        # offers the last date picked, so same-day creates in a row skip the calendar
-        reachable = sorted([o for o in ops if o[0] in kk.REPORTS], key=lambda o: (o[4] == "unassign", order.index(o[0]), o[3] or datetime.date.max, pos.get((o[0], o[1]), 10**6), o[2]))
-        fallback = [(o[1], o[2], o[3]) for o in ops if o[0] not in kk.REPORTS and o[4] != "unassign"]
-        tsv = f"{D}/plans/process-{TODAY}-r{rnd}.tsv"
-        with open(tsv, "w") as f:
-            for subj, t, lv, d, kind in reachable: f.write(f"{subj}\t{t}\t{lv}\t{d.month if d else 0}\t{d.day if d else 0}\n")   # 0/0 = unassign
-        safe_open("All Progress")
-        res = fill.main_ordered(tsv, f"{D}/state/process-create-{TODAY}-r{rnd}-{NOW:%H%M}.log")
-        for subj, t, lv, d, kind in reachable:
-            r = res.get((t, lv, str(d.month if d else 0), str(d.day if d else 0)), "")
-            if kind == "unassign":
-                if r in ("unassigned", "not assigned"): cache_drop(t, lv)
-                continue
+        key = lambda o: (o[1], o[2], str(o[3].month if o[3] else 0), str(o[3].day if o[3] else 0))
+        def run_pass(batch, tab, name):
+            tsv = f"{D}/plans/process-{TODAY}-r{rnd}-{name}.tsv"
+            with open(tsv, "w") as f:
+                for subj, t, lv, d, kind in batch:     # 0/0 = unassign; then the assignment's current date, to find its row
+                    f.write(f"{subj}\t{t}\t{lv}\t{d.month if d else 0}\t{d.day if d else 0}\t{cur_dates.get((t, lv)) or ''}\n")
+            safe_open(tab)
+            if tab == "Assignments": kk.scroll_top()     # the read leaves the list far down; the plan's week is its top
+            return fill.main_ordered(tsv, f"{D}/state/process-{name}-{TODAY}-r{rnd}-{NOW:%H%M}.log", tab)
+        # 1. moves and unassigns of existing assignments, on the Assignments tab: the read leaves the app there, and the plan's week
+        #    is the top of its list (newest date first), so there is no grade/subject switch and no trip down a long report
+        existing = sorted([o for o in ops if o[4] != "create"], key=lambda o: (o[4] == "unassign", o[3] or datetime.date.max))
+        res = run_pass(existing, "Assignments", "assignments") if existing else {}
+        ok = ("created", "redated", "unassigned", "not assigned", "done before")
+        retry = [o for o in existing if res.get(key(o)) not in ok and o[0] in kk.REPORTS]
+        # 2. creates (and whatever the Assignments tab could not do) through All Progress: one pass per report; within a report by
+        #    date, since the list jumps back to its top after every dialog anyway and a new assignment's dialog offers the last date
+        #    picked, so same-day creates in a row skip the calendar
+        reachable = sorted([o for o in ops if o[4] == "create" and o[0] in kk.REPORTS] + retry,
+                           key=lambda o: (o[4] == "unassign", order.index(o[0]), o[3] or datetime.date.max, pos.get((o[0], o[1]), 10**6), o[2]))
+        if reachable: res.update(run_pass(reachable, "All Progress", "progress"))
+        for subj, t, lv, d, kind in ops:
+            r = res.get(key((subj, t, lv, d, kind)), "")
+            if kind == "unassign" and r in ("unassigned", "not assigned"): cache_drop(t, lv)
             if r.startswith("level") and kind == "create" and [t, lv] not in state.setdefault("no_level", []): state["no_level"].append([t, lv])
-            if r not in ("created", "redated", "done before") and kind == "move": fallback.append((t, lv, d))
-        fallback_redate(fallback, log)
         state["last_run"] = (TODAY - datetime.timedelta(days=1)).isoformat()      # re-read today's rows fully
-        ops = diff(read_assignments())
+        rows = read_assignments(); ops = diff(rows); cur_dates = {(r["title"], r["level"]): r["date"] for r in rows}
         dropped = [o for o in ops if o[4] == "create" and [o[1], o[2]] in state.get("no_level", [])]
         ops = [o for o in ops if o not in dropped]
         dropped_all = locals().get("dropped_all", []) + dropped
@@ -257,5 +254,5 @@ def main():
 
 if __name__ == "__main__":
     if os.environ.get("KK_PROFILE") == "1":
-        import profile_kk; profile_kk.install(sys.modules[__name__], ["read_assignments", "catalog", "ensure_session", "alive_or_restart", "safe_open", "fallback_redate"])
+        import profile_kk; profile_kk.install(sys.modules[__name__], ["read_assignments", "catalog", "ensure_session", "alive_or_restart", "safe_open"])
     main()
