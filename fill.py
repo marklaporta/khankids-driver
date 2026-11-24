@@ -27,14 +27,19 @@ def enter_teacher():
     """Reach the Students page of the teacher view WITHOUT relaunching the app unless unavoidable.
     Signs in (Google prompt) only when coming from the profile picker."""
     if not kk.TEACHER_NAME: raise RuntimeError("set KK_TEACHER_NAME in local.env (see local.env.example)")
+    kk.foreground()
     w = where()
     if w == "teacher": return
     if w in ("report", "settings"):
         b = kk.q('type == "XCUIElementTypeImage" AND name CONTAINS "sandbox_back_btn"')
         if b: kk.click(b); time.sleep(2)
         if where() == "teacher": return
-    if w == "student" or where() == "unknown":
+    for _ in range(10):                                 # a screen still loading reads as "unknown" for a moment
+        if where() != "unknown": break
+        time.sleep(0.5)
+    if where() in ("student", "unknown"):
         # the student's profile (or something unexpected): the only way to the picker is a relaunch
+        print("   [relaunching Khan Kids: at", where(), "- the profile picker is only reachable from a fresh start]", flush=True)
         kk._req(f"/session/{kk.SID}/wda/apps/terminate", {"bundleId": "org.khanacademy.Khan-Kids"}); time.sleep(2)
         kk._req(f"/session/{kk.SID}/wda/apps/launch", {"bundleId": "org.khanacademy.Khan-Kids"}); time.sleep(6)
     d = kk.wait_for(ST + kk.lbl(kk.TEACHER_NAME), 10)
@@ -74,6 +79,7 @@ def dismiss_modals():
 
 def open_report(tab="All Progress"):
     """From anywhere in the teacher view, open Class Reports on the given tab (no sign-in if already inside)."""
+    kk.foreground()
     dismiss_modals()
     w = where()
     if w == "settings":
@@ -103,10 +109,11 @@ def on_report():
     """On Class Report > All Progress? One predicate query, no tree dump."""
     return kk.q(ST + 'label == "Class Report: All Progress"') is not None
 
+TRUSTED = False                                         # the last operation succeeded: still on the report, no need to re-check
 def ensure(subject):
     kk.wait_unlocked()
     if alive():
-        if on_report(): return False
+        if TRUSTED or on_report(): return False
         open_report("All Progress"); kk.set_subject(subject); return True
     print("WDA down -> restarting", flush=True)
     subprocess.run([kk.START], env={**os.environ, "SCRATCH": kk.SESS}, check=True, capture_output=True)
@@ -115,10 +122,11 @@ def ensure(subject):
     return True
 
 def main_ordered(path, log):
-    """One pass per report subject, rows already sorted by their position in that subject's list, so find_el only ever
-    scrolls DOWN a little. Creates new assignments, re-dates existing ones (pre-checked dialog) and unassigns (m/d = 0/0)
+    """One pass per report subject, rows already sorted by their position in that subject's list, so each find only scrolls
+    a little further. Creates new assignments, re-dates existing ones (pre-checked dialog) and unassigns (m/d = 0/0)
     in the same pass.
     Returns {(title, level, m, d): result}."""
+    global TRUSTED
     plan = [l.rstrip("\n").split("\t") for l in open(path) if l.strip() and not l.startswith("#")]
     done = set()
     if os.path.exists(log):
@@ -134,17 +142,13 @@ def main_ordered(path, log):
                 try:
                     if ensure(subj): cur = subj
                     if cur != subj:
-                        kk.set_subject(subj); cur = subj; kk.scroll_top()
+                        kk.set_subject(subj); cur = subj         # find_lesson steers from wherever the list is
                     res = kk.unassign(title, level) if m == "0" else kk.fast_create2(title, level, int(m), int(d), state)
                 except Exception as ex:
                     res = f"error {ex!r}"; time.sleep(1)
-                if res in ("created", "redated", "unassigned", "not assigned") or res.startswith("level"): break
-                try:
-                    x = kk.q(ST + kk.lbl("Cancel"))
-                    if x: kk.click(x); time.sleep(0.3)
-                    if kk.q(kk.DIALOG):
-                        c = kk.q('type == "XCUIElementTypeImage" AND name CONTAINS "leaf_hintvideo_close_btn"')
-                        if c: kk.click(c); time.sleep(0.5)
+                TRUSTED = res in ("created", "redated", "unassigned", "not assigned")
+                if TRUSTED or res.startswith("level"): break
+                try: kk.close_dialog()                  # leave a calendar or dialog the failed attempt left open
                 except Exception: time.sleep(1)
             results[(title, level, m, d)] = res
             out.write(f"{res}\t{title}\t{level}\t{m}\t{d}\n"); out.flush()
@@ -185,3 +189,6 @@ def main(path, log):
                 print(f"{res:<12} {title} {level} {m}/{d}  ({time.time()-t0:.1f}s)", flush=True)
 
 if __name__ == "__main__": main(sys.argv[2], sys.argv[3])
+
+if __import__("os").environ.get("KK_PROFILE") == "1":
+    import profile_kk, sys as _sys; profile_kk.install(_sys.modules[__name__])

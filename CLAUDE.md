@@ -16,8 +16,8 @@ detail in a tracked file. `state/` and `plans/` hold the student's data and are 
   Each launches the pre-built WDA runner, opens the USB tunnel (iPad 8100, iPhone 8101; the iPhone falls back to Wi-Fi),
   applies the no-idle-wait settings and writes the session id to `.session/` or `.session-iphone/`.
 - `./ipad.sh tap X Y | shot NAME [delay] | type "text" | swipe x1 y1 x2 y2`: coordinates in iPad points (1180x820 landscape).
-- `python3 kk.py rows|fixdates PLAN.tsv|tree`: drives the Assignments report from the accessibility tree (reliable; prefer
-  it over blind taps). If the app runs in a scaled Stage Manager window, `.session/xform` holds "OX OY SCALE"
+- `python3 kk.py rows|tree|taptext LABEL`: reads the screen from the accessibility tree (reliable; prefer it over blind taps).
+  `KK_PROFILE=1` (and `KK_TRACE=1`) on any script times every category of device action (`profile_kk.py`). If the app runs in a scaled Stage Manager window, `.session/xform` holds "OX OY SCALE"
   (screen = origin + scale * tree coords). Dialogs are in the tree. Per-device geometry lives in `kk.G`.
 - Gotcha: in the Assign dialog the date pencil moves with the date text width; never use a fixed coordinate for it.
   `shot` saves `NAME.png` and a 1000px `NAMEs.png` in `.session/`; scaled px * 1.18 = points.

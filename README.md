@@ -93,6 +93,9 @@ nohup python3 -u process.py > state/process.out 2>&1 &             # apply and v
 python3 finish.py                                # hand the device back on the profile picker and stop WDA
 ```
 
+Prefix any command with `KK_PROFILE=1` to see where the time goes: requests by type, sleeps by function and time per
+function, written to `state/profile-*.txt` (`KK_TRACE=1` also prints every request as it happens).
+
 Screen geometry is measured per device in `kk.G` (iPad 1180x820 and iPhone 956x440, both landscape). A different device
 or a redesigned app screen needs new measurements, and the agent can take them from the accessibility tree.
 

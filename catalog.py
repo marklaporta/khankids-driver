@@ -2,9 +2,12 @@
 """Read Class Reports > All Progress for every subject: the app's full lesson catalog in its own order, with the child's score per lesson.
 Writes state/catalog-YYYY-MM-DD.json: [{subject, category, title, score, status}]. Read-only (scrolls, never assigns).
 
+Each item also records "pos", its place in the list in points (row y minus the header row's y), which `kk.find_lesson` uses to
+steer straight to a lesson.
+
 Speed (11/23): each report list is virtualized, but the tree holds a window of rows wider than the screen (iPhone: ~20 rows, of which
-~13 are visible). A step drags most of that window (`G["cat_page"]`) and is verified: the new read must overlap rows already seen,
-else it backs up half a step. A report stops at the first category the plan never uses (books when `books_per_day` is 0, Logic+
+~13 are visible). A step is the longest momentum-free stroke (`G["stroke"]`) and is verified: the new read must reach back to rows
+already seen (by the header row's offset), else it backs up half a step. A report stops at the first category the plan never uses (books when `books_per_day` is 0, Logic+
 play content when `include_play` is false) once everything after it is unused too; those rows are carried over from the last read.
 KK_CATALOG_ALL=1 reads every row."""
 import sys, os, json, time, datetime; SUBJECTS = sys.argv[1:] or ["ELA", "Math", "Logic+"]; sys.argv=[sys.argv[0],"none"]; D = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, D)
@@ -32,15 +35,11 @@ def cut_after(subj):
 
 CX, TX, SX = kk.G["cat_x"], kk.G["title_x"], kk.G["score_x"]
 TOP, BOT = kk.G.get("cat_top", kk.G["list_top"]), kk.G["list_bot"]
-P0, P1 = kk.G.get("cat_page", kk.G["page"])
+P0, P1 = kk.G["stroke"]
 def rows():
     t = kk.tree()
     return sorted([e for e in t if e[0] == "StaticText" and TOP <= e[3] < BOT and e[2] in (CX, TX, SX)], key=lambda e: e[3]), t
-def header_y(t):
-    """The report's header row ('Preschool (Age 3): ELA  253') is the top of the list content and stays in the tree: its y is
-    minus the scroll offset, so row y - header y is a row's fixed position in the list. None if not found."""
-    h = [e for e in t if e[0] == "StaticText" and "): " in e[1] and e[2] < CX]
-    return h[0][3] if h else None
+def header_y(t): h = kk.header_row(t); return h[3] if h else None
 def at_top(t): h = header_y(t); return h is not None and h > -20
 
 out = []; failed = []
@@ -49,10 +48,10 @@ for subj in SUBJECTS:
     t0 = time.time()
     try: kk.set_subject(subj)
     except Exception as ex: print("subject", subj, "failed", ex, flush=True); failed.append(subj); continue
-    time.sleep(0.5)
     st, t = rows()
-    if not at_top(t): kk.scroll_top(); time.sleep(0.4); st, t = rows()
+    if not at_top(t): kk.scroll_top(); st, t = rows()
     cut = cut_after(subj); stop = False
+    prev_last = next((c["title"] for c in reversed(prev) if c["subject"] == subj), None)
     seen = []; catof = {}; cat = None; last = None; stale = 0; steps = 0; backs = 0; reach = None   # reach: list position read down to
     for _ in range(200):
         # the category at the TOP of this read = the category of the first row already seen (reads overlap);
@@ -60,7 +59,7 @@ for subj in SUBJECTS:
         hy = header_y(t); titles = [e for e in st if e[2] == TX]
         if steps and titles and (all(e[1] not in catof for e in titles) if hy is None else titles[0][3] - hy > reach + 4):
             # a gap between this read and the last one (rows may have been skipped): back up half a step and read again
-            kk.drag_settle(kk.G["drag_x"], P1 + 20, P1 + 20 + (P0 - P1) // 2); backs += 1
+            kk.scroll_by(-(P0 - P1) // 2); backs += 1
             st, t = rows(); continue
         if hy is not None and titles: reach = max(reach or -1e9, titles[-1][3] - hy)
         for e in st:
@@ -74,12 +73,13 @@ for subj in SUBJECTS:
             elif e[2] == TX and e[1].strip():
                 sc = next((x[1] for x in st if x[2] == SX and abs(x[3] - e[3]) < 6), "")
                 if e[1] not in catof:
-                    catof[e[1]] = cat; seen.append({"subject": subj, "category": cat, "title": e[1], "score": sc}); new += 1
+                    catof[e[1]] = cat; new += 1
+                    seen.append({"subject": subj, "category": cat, "title": e[1], "score": sc, "pos": None if hy is None else e[3] - hy})
         if stop: break
         sig = tuple((e[2], e[1]) for e in st)
         if sig == last:
-            stale += 1
-            if stale >= 2: break                       # two drags that moved nothing: the end of the list
+            stale += 1                                 # a drag that moved nothing: the end of the list. One bump is enough when the
+            if stale >= 2 or (prev_last and prev_last in catof): break     # last read's final row has been seen; else try once more
         else: stale = 0
         last = sig
         kk.drag_settle(kk.G["drag_x"], P0, P1); steps += 1

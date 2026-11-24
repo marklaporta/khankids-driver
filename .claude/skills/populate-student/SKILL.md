@@ -20,12 +20,14 @@ change them there, not in `planner.py`.
 - iPhone: plugged in -> USB tunnel on 8101; not plugged in -> Wi-Fi to the phone's last known IP (`.session-iphone/ip`).
   `kk.py` picks the iPhone geometry table `kk.G`, session dir `.session-iphone`, and the start/stop scripts.
   `finish.py` on the phone does not Switch User (the next run needs no sign-in) and stops the iPhone runner.
-- iPhone specifics: 956x440 landscape; the tree also holds off-screen rows (`find_el` nudges a row into the visible band
-  before tapping); level rows must be tapped by coordinate (an element click scrolls instead); queries take about 0.6 s; the
-  calendar's right pane is off-screen (`pick_date` always works in the left pane anyway).
-- Phone safety: level rows are settled and scrolled into view before the tap; Assignments-tab rows are tapped only when
+- iPhone specifics: 956x440 landscape; the tree also holds off-screen rows (`find_lesson` brings a row into the visible band
+  before tapping); the calendar's right pane is off-screen (`pick_date` always works in the left pane anyway); a finger never
+  starts below y 415 (the bottom edge is the home gesture).
+- Phone safety: every tap uses coordinates from a fresh tree read of a list at rest; Assignments-tab rows are tapped only when
   on screen (`G["row_tap"]`); the phone's Assign dialog names the lesson and level, and `kk.dialog_is()` must match before
   any save ("wrong dialog" otherwise).
+- The driver brings Khan Kids back to the front (`kk.foreground`) and waits for an unlock (`wait_unlocked`) instead of
+  relaunching it; only the student's own profile forces a relaunch (the profile picker is reachable only from a fresh start).
 
 ## Core rules
 1. TWO-RESULT RULE. One good score is not enough to build on: a young child's repeat scores swing widely. A strand moves up
@@ -70,48 +72,64 @@ COPY of state (overlay + mark_done as in process.py), including what-if attempts
    for hole-filling.
 
 ## Speed design
-Targets: about 5 minutes for a nightly run, 20-25 minutes for a full rebuild. The `APPLIED in N min` line reports the actual time.
+Measured on the iPhone, 11/23: a nightly run of 15 changes takes about 2.5 minutes (`APPLIED in N min`); a full catalog read of
+10 reports about 2 minutes. Per change: ~4 s to re-date or unassign, ~7-8 s when the calendar is needed.
+- Measure before optimizing: `KK_PROFILE=1` times every category of device action (requests by type, sleeps by function,
+  inclusive/self time per function) and writes `state/profile-*.txt`; `KK_TRACE=1` also prints every request as it happens.
 - No idle waits. The start scripts post `/appium/settings`: waitForIdleTimeout 0, animationCoolOffTimeout 0,
   snapshotMaxDepth 25, useFirstMatch. Without it, every tap and query waits for a quiescence the Unity app never reaches.
-- One pass, list order. Every operation goes through Class Reports > All Progress, sorted by the lesson's position in that
-  subject's list, so `find_el` only scrolls a little further down; there is no search from the top per lesson. Operations
-  are creates, moves of existing assignments, and unassigns: anything assigned, unfinished and dated from the start of the
-  plan on that the plan doesn't want is removed (`kk.unassign`: open its dialog, uncheck the student, Save; about 10 s).
-  The plan lives in `state/`, so the app never holds a parking pool. Unassigned rows also leave `state/assign-cache.json`
-  (and the incremental read prunes cached rows in its re-read range that the app no longer shows).
+- Read the tree, then act by coordinates. One tree read (`kk.tree()`, ~0.25 s; visibility attributes excluded, which halves
+  it) shows the list rows and their positions, an open dialog's title, level, checkbox, date, pencil and Save
+  (`kk.dialog_state`), the calendar's month and days, and the All Progress scroll offset (`kk.header_row`). A predicate query
+  (`kk.q`, 0.1-0.2 s) answers one question, so it is only for one-off checks. Every tap is a W3C touch (~0.45 s, the floor:
+  XCTest waits for the event to be delivered); taps are now the largest cost, about 7 per change.
+- Moving through a list: `kk.drag_settle` is a drag that ends slowly, so the list stops where the finger lifts (no momentum,
+  ~0.8 s for ~360 points). Long distances are flicks caught by a stroke (`kk.travel`, calibrated in `G["jump"]`: 1, 2, 3 flicks
+  = 1540, 2625, 3760 points in 1.5, 2.3, 3.0 s). A plain touch must never stop a moving list: it opens the row under it.
+  Several strokes in one actions request don't work (the later ones register as taps).
+- Finding a lesson (`kk.find_lesson`): the All Progress list jumps back to its TOP whenever an Assign dialog closes, so each
+  change travels from the top. The catalog read records each lesson's place in its list (`pos`); the target's distance from
+  the nearest row in view says how far to travel, in either direction. A lesson missing from the catalog falls back to paging
+  down, then wrapping to the top once; the end of a list is one drag that changed nothing.
+- One pass per report, grouped by date: creates, moves and unassigns in one pass through All Progress (`fill.main_ordered`),
+  creates and moves first, then unassigns. Within a report the changes go by date: a new assignment's dialog offers the last
+  date picked, so same-day creates in a row skip the calendar. Operations are creates, moves of existing assignments, and
+  unassigns: anything assigned, unfinished and dated from the start of the plan on that the plan doesn't want is removed
+  (`kk.unassign`: open its dialog, uncheck the student, Save). The plan lives in `state/`, so the app never holds a parking
+  pool. Unassigned rows also leave `state/assign-cache.json` (and the incremental read prunes cached rows in its re-read range
+  that the app no longer shows).
   - Existing assignment: the dialog opens with the student's checkbox already checked. Khan Kids has one assignment per
     lesson and level. `fast_create2` changes its date in place, or closes it if the date is already right.
   - The Assignments-tab `kk.redate` is only a fallback.
   - The dialog's date is read before every Save, and the calendar opens only when it is wrong.
   - Trade-off: within a day the student sees lessons in the app's list order, not a custom order.
+- Switching report (`kk.set_subject`): nothing to do when the header row already shows it; otherwise taps only the options not
+  yet selected (the Grade and Subject columns share rows, so each toggle is matched to its own label) and returns when the new
+  header appears (~3.5 s).
 - No sticky plan. The plan is deterministic from the student's data, so a re-run without new results changes nothing.
 - Incremental reads.
   - Assignments: the list is newest-date first. The scan stops at the last run's date minus 1 and merges into
     `state/assign-cache.json`.
   - All Progress catalog: a full read once a week per subject and grade, kept in `state/catalog-latest.json`. In between,
     scores from assignments override the catalog through `state.json` "attempts", which also records when each attempt happened.
+    Each step is the longest stroke and is verified against the header offset (a gap backs up half a step). Categories the plan
+    never uses (books when `books_per_day` is 0, play content when `include_play` is false) are carried over from the last read
+    once nothing after them is used.
   - Learning Path work shows up ONLY in the All Progress catalog, not in Assignments. Whenever the parent says the student
-    used the Learning Path, run with `--full-catalog` (about 10 minutes of reading).
+    used the Learning Path, run with `--full-catalog` (about 2 minutes of reading).
   - A failed catalog read is loud: it prints a WARNING, uses the last good read, and refuses to plan without ELA and Math.
 - "Developer App Certificate is not trusted" at WDA launch: the automatic restart usually fixes it. If it persists, trust
   the developer app on the device (Settings > General > VPN & Device Management).
 - Lock and WDA drops: 12-second request timeout, wait while `/wda/locked`, and a WDA restart that never touches the app.
-- Per-change speed: about 10 seconds for a change on a nearby row.
-  - Paging lists: `kk.page_down()` is a W3C touch drag of 340 points over 350 ms, held 200 ms before release. The hold kills
-    momentum, so screens overlap by about 3 rows and no row is ever skipped. Faster flings move more than a screen and skip
-    rows: never use them to search; `page_up_fast` flings are only for going back to the top.
-  - `find_el`: one cheap predicate lookup per page. The full-screen read (about 1.7 seconds) runs only every 6th page, to
-    detect the end of the list. Report lists are virtualized, so off-screen rows don't exist and scroll-to-element can't work.
-  - Position filters belong inside predicates, e.g. `... AND rect.y > 250 AND rect.y < 330`. Never fetch `rect()` per
-    element just to filter, because each call costs about 0.35 seconds.
-  - Date checks and the calendar month are single predicate lookups. The slow tree read happens only when a mismatch needs explaining.
 - CORRECTNESS: on the iPad the assign dialog does NOT show the lesson's name. If a list is still settling after a drag, the
   tap opens the NEIGHBOUR's dialog and the change lands on the wrong lesson.
-  - Guard 1: `kk.settled()` waits until the row stops moving, then taps the label's center.
-  - Guard 2: after applying, `process.py` re-reads the assignments and repairs any difference from the plan, up to 2 more
+  - Guard 1: a row is tapped only from a read of a list at rest (on the iPad, two consecutive reads must agree on its
+    position); a group's level row is tapped only after it stopped moving (an opening group scrolls the list).
+  - Guard 2 (iPhone): `kk.dialog_is` checks the dialog's lesson and level before anything is changed.
+  - Guard 3: after applying, `process.py` re-reads the assignments and repairs any difference from the plan, up to 2 more
     rounds. Success is `VERIFIED: app matches the plan`. `WARNING: N differences remain` must be investigated.
-  - "Pre-checked" in the dialog is not proof the lesson is already assigned. The flow therefore always ends with the
-    student checked, the date right, and Save.
+- The iPad path shares all of this code but its new timings (strokes, jumps) are not yet measured: `G["ipad"]` has no `jump`
+  calibration, so lists move by strokes only there. Calibrate it with a profiled run before relying on the numbers above.
 - Untested idea: the teacher Search tab might jump straight to a lesson by name. Test it once by hand before building on it.
 
 NEVER edit `state/state.json` while `process.py` is running: it saves its in-memory copy at the end and overwrites the edit.

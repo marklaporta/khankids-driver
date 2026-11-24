@@ -223,7 +223,9 @@ def main():
         if not ops: break
         if rnd: print(f"\nrepair round {rnd}: {len(ops)} differences after re-read: {[(o[1], o[2], str(o[3]), o[4]) for o in ops]}", flush=True)
         # what the child will see first: creates + moves in one list-order pass, then a second pass for the unassigns
-        reachable = sorted([o for o in ops if o[0] in kk.REPORTS], key=lambda o: (o[4] == "unassign", order.index(o[0]), pos.get((o[0], o[1]), 10**6), o[2]))
+        # within a report, by date: the list jumps back to its top after every dialog anyway, and a new assignment's dialog
+        # offers the last date picked, so same-day creates in a row skip the calendar
+        reachable = sorted([o for o in ops if o[0] in kk.REPORTS], key=lambda o: (o[4] == "unassign", order.index(o[0]), o[3] or datetime.date.max, pos.get((o[0], o[1]), 10**6), o[2]))
         fallback = [(o[1], o[2], o[3]) for o in ops if o[0] not in kk.REPORTS and o[4] != "unassign"]
         tsv = f"{D}/plans/process-{TODAY}-r{rnd}.tsv"
         with open(tsv, "w") as f:
@@ -254,4 +256,6 @@ def main():
     print(f"APPLIED in {(time.time()-t0)/60:.1f} min", flush=True)
 
 if __name__ == "__main__":
+    if os.environ.get("KK_PROFILE") == "1":
+        import profile_kk; profile_kk.install(sys.modules[__name__], ["read_assignments", "catalog", "ensure_session", "alive_or_restart", "safe_open", "fallback_redate"])
     main()
