@@ -539,6 +539,9 @@ def plan(catalog, rows, state, horizon, caps=None):
         day = days[d]
         if len(day) >= cap(d) or (x["title"], x["level"]) in placed: return False
         if x["not_before"] and d < x["not_before"]: return False
+        # state "free_days" [date, ...]: the parent set the per-day rules aside for that date (e.g. a travel day with many lessons):
+        # only the day's size (day_caps) applies, so the queue fills it in priority order.
+        if d.isoformat() in state.get("free_days", []): return True
         if x["family"] and x["family"] in families_used: return False          # readiness check: one in the whole plan
         k = x["kind"]
         if k == "book" and sum(1 for y in day if y["kind"] == "book") >= BOOKS_PER_DAY: return False

@@ -213,7 +213,9 @@ NEVER edit `state/state.json` while `process.py` is running: it saves its in-mem
   short days. When the family wants them: non-fiction first, decodable Early Readers only after CVC opens.
 - Today holds up to `daily` like any other day; there is no standing after-play cap. When the parent asks for a smaller or
   different day, use `--today-max N` for that run (or `state.json` "day_caps" {date: n}). If the student is done for the
-  day, use `--tomorrow`.
+  day, use `--tomorrow`. A big day (travel, a sick day) where the parent sets the rules aside: list the date in `state.json`
+  "free_days" with its "day_caps" size; only the size applies, so the queue fills it in priority order, and a one-day focus
+  track with "items" adds extras when the queue runs out.
 - Play content (Logic+ songs, movement, feelings and habits) is assigned only when settings `include_play` is true;
   otherwise only the cognitive Logic+ categories are. Settings `exclude_titles` removes specific lessons.
 - Diff into creates, moves and unassigns in one list-order pass, then verify and repair rounds. See Speed design.
